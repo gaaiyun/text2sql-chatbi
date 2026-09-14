@@ -1,0 +1,188 @@
+{
+  "name": "Text2SQL Analysis Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "text2sql",
+        "responseMode": "responseNode"
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "text2sql-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst query = input.query || input.body.query || '';\n\nconst scenarios = {\n  '数据洞察': ['洞察', '分析', '趋势', '统计'],\n  '地区产业': ['地区', '省份', '城市', '产业'],\n  '行业分析': ['行业', '领域', '赛道'],\n  '招商清单': ['招商', '清单', '筛选', '评估'],\n  '尽调报告': ['尽调', '报告', '调查']\n};\n\nlet detectedScenario = '数据洞察';\nlet maxScore = 0;\n\nfor (const [scenario, keywords] of Object.entries(scenarios)) {\n  const score = keywords.filter(kw => query.includes(kw)).length;\n  if (score > maxScore) {\n    maxScore = score;\n    detectedScenario = scenario;\n  }\n}\n\nreturn [{\n  json: {\n    originalQuery: query,\n    scenario: detectedScenario,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "task-classifier",
+      "name": "Task Classifier",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/agent/query",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "question",
+              "value": "={{ $json.originalQuery }}"
+            },
+            {
+              "name": "scenario",
+              "value": "={{ $json.scenario }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "vanna-sql-generator",
+      "name": "Vanna SQL Generator",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const agentResult = $input.first().json;\nconst taskInfo = $('Task Classifier').first().json;\n\nif (!agentResult.success) {\n  return [{\n    json: {\n      error: 'Agent query failed',\n      message: agentResult.error || 'Unknown error',\n      scenario: taskInfo.scenario,\n      trace: agentResult.trace || []\n    }\n  }];\n}\n\nconst sql = agentResult.safe_sql || agentResult.sql;\n\nreturn [{\n  json: {\n    sql: sql,\n    rows: agentResult.rows || [],\n    columns: agentResult.columns || [],\n    analysis: agentResult.analysis || '',\n    report: agentResult.report || '',\n    scenario: taskInfo.scenario,\n    originalQuery: taskInfo.originalQuery,\n    needsAnalysis: ['数据洞察', '地区产业', '行业分析'].includes(taskInfo.scenario)\n  }\n}];"
+      },
+      "id": "data-processor",
+      "name": "Data Processor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "model": "qwen3.5-plus",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "你是一个数据分析专家。基于数据库查询结果进行深度分析。要求：1.分析数据趋势和异常点 2.结合业务场景解读 3.输出 Markdown 格式"
+            },
+            {
+              "role": "user",
+              "content": "={{ '用户问题：' + $('Data Processor').first().json.originalQuery + '\\n\\nSQL: ' + $('Data Processor').first().json.sql }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "llm-analysis",
+      "name": "LLM Analysis",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [1050, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_BAILIAN_CREDENTIAL_ID",
+          "name": "Bailian API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const llmResult = $input.first().json;\nconst taskInfo = $('Data Processor').first().json;\n\nconst markdownOutput = '# Text2SQL 分析报告\\n\\n## 查询信息\\n- **场景**: ' + taskInfo.scenario + '\\n- **原始问题**: ' + taskInfo.originalQuery + '\\n- **生成 SQL**: \\n```sql\\n' + taskInfo.sql + '\\n```\\n\\n## 分析结果\\n' + (llmResult.content || llmResult.message?.content || '分析完成') + '\\n\\n---\\n*生成时间：' + new Date().toLocaleString() + '*';\n\nreturn [{\n  json: {\n    output: markdownOutput,\n    format: 'markdown',\n    scenario: taskInfo.scenario\n  }\n}];"
+      },
+      "id": "markdown-formatter",
+      "name": "Markdown Formatter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "response-webhook",
+      "name": "Response Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1450, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Task Classifier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Task Classifier": {
+      "main": [
+        [
+          {
+            "node": "Vanna SQL Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vanna SQL Generator": {
+      "main": [
+        [
+          {
+            "node": "Data Processor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data Processor": {
+      "main": [
+        [
+          {
+            "node": "LLM Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Analysis": {
+      "main": [
+        [
+          {
+            "node": "Markdown Formatter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Markdown Formatter": {
+      "main": [
+        [
+          {
+            "node": "Response Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCounters": {}
+}

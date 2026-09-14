@@ -1,0 +1,17 @@
+{
+  // Workers 静态资源：site/dist 由 scripts/build_site.py 生成
+  "name": "text2sql-chatbi",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "ai": { "binding": "AI" },
+  // 每个 IP 每分钟最多 30 次模型调用（一道长尾题通常 4–8 次）
+  "ratelimits": [
+    { "name": "LLM_LIMITER", "namespace_id": "20260914", "simple": { "limit": 30, "period": 60 } }
+  ],
+  "observability": { "enabled": true }
+}

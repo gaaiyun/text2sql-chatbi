@@ -1,0 +1,45 @@
+id: retail
+kind: sample
+title: 连锁茶饮门店
+tagline: 门店 · 销售明细 · 会员
+summary: >-
+  珠三角 8 家茶饮门店 2025 年 1 月至 2026 年 6 月的销售明细，每三天一批。本项目用固定随机种子生成的合成数据，
+  两张中文表通过门店编号关联，适合试分布、排名、趋势、占比和关联查询。
+source:
+  name: text2sql.datasets.samples（本项目生成）
+  url: https://github.com/gaaiyun/text2sql-chatbi/blob/main/text2sql/datasets/samples.py
+license:
+  name: MIT
+  url: https://github.com/gaaiyun/text2sql-chatbi/blob/main/LICENSE
+anchor_year: 2026
+
+tables:
+  门店销售:
+    label: 门店销售
+    description: 每行是某家门店某天某个商品的销售汇总
+    synonyms: [营业额, 流水, 销量, 卖了多少]
+    columns:
+      销售额: {description: 数量 × 单价，单位元, synonyms: [营业额, 流水, 收入]}
+      数量: {synonyms: [销量, 杯数, 件数]}
+      是否会员: {description: 这批销售是否来自会员}
+  门店:
+    label: 门店
+    description: 每行一家门店，含所在城市、开业日期和面积
+    synonyms: [店铺, 分店]
+    columns:
+      开业日期: {description: 开业前没有销售记录}
+
+relationships:
+  - {from: 门店销售.门店编号, to: 门店.门店编号, cardinality: many_to_one}
+
+rules:
+  - 销售额已按行算好（数量 × 单价），求合计直接 SUM(销售额)。
+  - 各门店开业时间不同，比较门店业绩时注意统计期内的营业天数不一样。
+
+suggestions:
+  - 按城市统计销售额的合计
+  - 2026 年上半年各品类的销售额占比
+  - 按月统计销售额的变化趋势
+  - 会员和非会员的销售额各是多少
+  - 各门店的销售额排名，带上门店名称
+  - 每平方米销售额最高的门店

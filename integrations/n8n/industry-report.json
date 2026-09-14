@@ -1,0 +1,136 @@
+{
+  "name": "行业分析报告生成",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "industry-report",
+        "responseMode": "lastNode"
+      },
+      "id": "webhook-node",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/agent/query",
+        "sendHeaders": {
+          "header": {
+            "name": "Content-Type",
+            "value": "application/json"
+          }
+        },
+        "sendBody": {
+          "body": {
+            "entries": [
+              {
+                "name": "question",
+                "value": "={{ $json.question }}"
+              },
+              {
+                "name": "generate_chart",
+                "value": "true"
+              }
+            ]
+          }
+        },
+        "options": {}
+      },
+      "id": "http-request-node",
+      "name": "HTTP Request - Agent API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "code": "import plotly.express as px\nimport pandas as pd\n\n# 从 Agent Runtime 响应获取数据\ndata = $input.all()[0].json.get('rows', [])\ndf = pd.DataFrame(data)\n\n# 自动生成合适的图表\nif len(df.columns) >= 2:\n    fig = px.bar(df, x=df.columns[0], y=df.columns[1], title='行业分析')\n    fig.write_html('/tmp/chart.html')\n\nreturn {\n    'chart_path': '/tmp/chart.html',\n    'rows': data,\n    'sql': $input.all()[0].json.get('safe_sql') or $input.all()[0].json.get('sql'),\n    'analysis': $input.all()[0].json.get('analysis', '')\n}"
+      },
+      "id": "code-chart-node",
+      "name": "Code - 图表生成",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "code": "from jinja2 import Template\n\nhtml_template = '''\n<!DOCTYPE html>\n<html>\n<head>\n    <title>行业分析报告</title>\n    <style>\n        body { font-family: Arial; margin: 40px; }\n        h1 { color: #2c3e50; }\n        .chart { margin: 20px 0; }\n        table { border-collapse: collapse; width: 100%; }\n        th, td { border: 1px solid #ddd; padding: 8px; }\n        th { background-color: #3498db; color: white; }\n    </style>\n</head>\n<body>\n    <h1>行业分析报告</h1>\n    <p><strong>生成时间:</strong> {{ timestamp }}</p>\n    <p><strong>问题:</strong> {{ question }}</p>\n    \n    <h2>SQL 查询</h2>\n    <pre><code>{{ sql }}</code></pre>\n    \n    <h2>数据结果</h2>\n    {{ table_html }}\n    \n    <h2>可视化图表</h2>\n    <div class=\"chart\">\n        {{ chart_html }}\n    </div>\n    \n    <h2>分析总结</h2>\n    <p>{{ summary }}</p>\n</body>\n</html>\n'''\n\nimport json\nfrom datetime import datetime\n\nwith open('/tmp/chart.html', 'r') as f:\n    chart_html = f.read()\n\ntemplate = Template(html_template)\nreport = template.render(\n    timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),\n    question=$input.all()[0].json.question,\n    sql=$input.all()[0].json.sql,\n    table_html=$input.all()[0].json.markdown,\n    chart_html=chart_html,\n    summary='基于数据分析，行业呈现稳定增长趋势...'\n)\n\nreturn {'html': report}"
+      },
+      "id": "code-report-node",
+      "name": "HTML 报告组装",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "filePath": "/tmp/report.html",
+        "options": {}
+      },
+      "id": "write-file-node",
+      "name": "保存文件",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Vanna API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Vanna API": {
+      "main": [
+        [
+          {
+            "node": "Code - 图表生成",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - 图表生成": {
+      "main": [
+        [
+          {
+            "node": "HTML 报告组装",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML 报告组装": {
+      "main": [
+        [
+          {
+            "node": "保存文件",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2026-02-26T03:50:00.000Z",
+  "versionId": "1"
+}

@@ -1,0 +1,32 @@
+# 本地一键启动：接口 http://localhost:8000/docs ，界面 http://localhost:8501
+# 模型与数据库配置写在 .env（参考 .env.example）；不写也能用演示库运行。
+
+services:
+  api:
+    build: .
+    image: text2sql-analysis:local
+    command: ["python", "-m", "text2sql", "serve", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    restart: unless-stopped
+
+  ui:
+    build: .
+    image: text2sql-analysis:local
+    depends_on:
+      - api
+    command: ["streamlit", "run", "streamlit_app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]
+    ports:
+      - "8501:8501"
+    env_file:
+      - path: .env
+        required: false
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+    restart: unless-stopped

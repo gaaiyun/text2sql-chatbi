@@ -1,0 +1,149 @@
+id: northwind
+kind: open
+title: Northwind 贸易
+tagline: 订单 · 客户 · 产品 · 员工 · 供应商
+summary: >-
+  一家食品进出口公司 1996 年 7 月至 1998 年 5 月的业务数据：830 张订单、2155 条订单明细、91 个客户、77 种产品。
+  微软为 SQL Server 编写的样例库，BI 与 SQL 教学里最常用的一套订单数据。
+source:
+  name: microsoft/sql-server-samples
+  url: https://github.com/microsoft/sql-server-samples/tree/master/samples/databases/northwind-pubs
+license:
+  name: MIT
+  url: https://github.com/microsoft/sql-server-samples/blob/master/license.txt
+anchor_year: 1998
+
+tables:
+  Orders:
+    label: 订单
+    synonyms: [订单数, 下单, 运费, 发货]
+    description: 每行一张订单，含下单、要求到货与发货日期、运费和收货地
+    columns:
+      OrderID: 订单编号
+      CustomerID: 客户编号
+      EmployeeID: 负责员工编号
+      OrderDate: 下单日期
+      RequiredDate: 要求到货日期
+      ShippedDate: {label: 发货日期, description: 为空表示尚未发货}
+      ShipVia: {label: 承运商编号, role: dimension}
+      Freight: {label: 运费, description: 美元}
+      ShipName: 收货方
+      ShipCity: 收货城市
+      ShipRegion: 收货地区
+      ShipCountry: 收货国家
+  OrderDetails:
+    label: 订单明细
+    synonyms: [销售额, 营业额, 销量, 收入, 卖出]
+    description: 每行是一张订单里的一种产品，含成交单价、数量和折扣
+    columns:
+      OrderID: 订单编号
+      ProductID: 产品编号
+      UnitPrice: {label: 成交单价, description: 美元}
+      Quantity: 数量
+      Discount: {label: 折扣, description: 0 到 1 之间的小数，0.15 表示打 85 折}
+  Products:
+    label: 产品
+    synonyms: [商品, 库存, 停售]
+    columns:
+      ProductID: 产品编号
+      ProductName: 产品名称
+      SupplierID: 供应商编号
+      CategoryID: 类别编号
+      QuantityPerUnit: 包装规格
+      UnitPrice: {label: 目录单价, description: 当前价目表价格，不是历史成交价}
+      UnitsInStock: 库存数量
+      UnitsOnOrder: 在途数量
+      ReorderLevel: 补货阈值
+      Discontinued: {label: 是否停售, description: 1 表示已停售, role: dimension}
+  Categories:
+    label: 产品类别
+    synonyms: [品类, 类别]
+    columns:
+      CategoryID: 类别编号
+      CategoryName: 类别名称
+      Description: 类别说明
+  Customers:
+    label: 客户
+    synonyms: [顾客, 买家]
+    columns:
+      CustomerID: 客户编号
+      CompanyName: 客户公司
+      ContactTitle: 联系人职务
+      City: 城市
+      Region: 地区
+      Country: 国家
+  Employees:
+    label: 员工
+    synonyms: [销售员, 业务员]
+    columns:
+      EmployeeID: 员工编号
+      LastName: 姓
+      FirstName: 名
+      Title: 职务
+      TitleOfCourtesy: 称谓
+      BirthDate: 出生日期
+      HireDate: 入职日期
+      City: 城市
+      Region: 地区
+      Country: 国家
+      ReportsTo: {label: 上级员工编号, role: dimension}
+  Suppliers:
+    label: 供应商
+    synonyms: [厂商]
+    columns:
+      SupplierID: 供应商编号
+      CompanyName: 供应商名称
+      ContactTitle: 联系人职务
+      City: 城市
+      Region: 地区
+      Country: 国家
+  Shippers:
+    label: 承运商
+    synonyms: [物流公司, 快递, 物流]
+    columns:
+      ShipperID: 承运商编号
+      CompanyName: 承运商名称
+  Region:
+    label: 销售大区
+    columns:
+      RegionID: 大区编号
+      RegionDescription: 大区名称
+  Territories:
+    label: 销售区域
+    synonyms: [片区]
+    columns:
+      TerritoryID: 区域编号
+      TerritoryDescription: 区域名称
+      RegionID: 大区编号
+  EmployeeTerritories:
+    label: 员工负责区域
+    columns:
+      EmployeeID: 员工编号
+      TerritoryID: 区域编号
+
+relationships:
+  - {from: Orders.CustomerID, to: Customers.CustomerID, cardinality: many_to_one}
+  - {from: Orders.EmployeeID, to: Employees.EmployeeID, cardinality: many_to_one}
+  - {from: Orders.ShipVia, to: Shippers.ShipperID, cardinality: many_to_one}
+  - {from: OrderDetails.OrderID, to: Orders.OrderID, cardinality: many_to_one}
+  - {from: OrderDetails.ProductID, to: Products.ProductID, cardinality: many_to_one}
+  - {from: Products.CategoryID, to: Categories.CategoryID, cardinality: many_to_one}
+  - {from: Products.SupplierID, to: Suppliers.SupplierID, cardinality: many_to_one}
+  - {from: Employees.ReportsTo, to: Employees.EmployeeID, cardinality: many_to_one, note: 上级}
+  - {from: Territories.RegionID, to: Region.RegionID, cardinality: many_to_one}
+  - {from: EmployeeTerritories.EmployeeID, to: Employees.EmployeeID, cardinality: many_to_one}
+  - {from: EmployeeTerritories.TerritoryID, to: Territories.TerritoryID, cardinality: many_to_one}
+
+rules:
+  - 销售额按订单明细计算：OrderDetails.UnitPrice × Quantity × (1 − Discount)，不含运费 Freight。
+  - 算销售额用 OrderDetails.UnitPrice（成交单价），不要用 Products.UnitPrice（当前目录价）。
+  - 订单时间以 Orders.OrderDate 为准，数据覆盖 1996-07-04 至 1998-05-06，1996 年只有下半年、1998 年只有前 5 个月，跨年比较时要说明。
+  - 员工姓名展示为 FirstName 与 LastName 拼接。
+
+suggestions:
+  - 1997 年各产品类别的销售额
+  - 销售额最高的 10 个客户及其所在国家
+  - 按月统计 1997 年的订单数和销售额
+  - 每位员工 1997 年的销售额排名
+  - 各承运商的订单数与平均运费
+  - 已停售的产品有哪些，历史上各卖出多少件

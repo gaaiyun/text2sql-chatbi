@@ -1,0 +1,120 @@
+{
+  "name": "Text2SQL 行业分析报告生成",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "text2sql-query",
+        "responseMode": "lastNode"
+      },
+      "id": "webhook-node",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/agent/query",
+        "sendHeaders": {
+          "header": {
+            "name": "Content-Type",
+            "value": "application/json"
+          }
+        },
+        "sendBody": {
+          "body": {
+            "entries": [
+              {
+                "name": "question",
+                "value": "={{ $json.question }}"
+              }
+            ]
+          }
+        },
+        "options": {}
+      },
+      "id": "http-request-node",
+      "name": "HTTP Request - Agent API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "code": "import pandas as pd\n\n# 从 Agent Runtime 响应获取数据\ndata = $input.all()[0].json.get('rows', [])\ndf = pd.DataFrame(data)\n\n# 生成 Markdown 表格\nmarkdown_table = df.to_markdown(index=False) if not df.empty else '无数据'\n\nreturn {\n    'markdown': markdown_table,\n    'data': data,\n    'sql': $input.all()[0].json.get('safe_sql') or $input.all()[0].json.get('sql'),\n    'analysis': $input.all()[0].json.get('analysis', '')\n}"
+      },
+      "id": "code-node",
+      "name": "Code - 数据处理",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.markdown }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/markdown"
+              }
+            ]
+          }
+        }
+      },
+      "id": "respond-node",
+      "name": "Markdown 输出",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [850, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Vanna API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Vanna API": {
+      "main": [
+        [
+          {
+            "node": "Code - 数据处理",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - 数据处理": {
+      "main": [
+        [
+          {
+            "node": "Markdown 输出",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2026-02-26T03:50:00.000Z",
+  "versionId": "1"
+}

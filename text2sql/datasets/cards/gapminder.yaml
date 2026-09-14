@@ -1,0 +1,44 @@
+id: gapminder
+kind: open
+title: Gapminder 全球发展
+tagline: 142 个国家 · 1952–2007 · 人口 · 寿命 · 人均 GDP
+summary: >-
+  142 个国家或地区从 1952 年到 2007 年每 5 年一次的人口、预期寿命与人均 GDP，共 1704 行。
+  数据摘自 Gapminder 基金会，Jenny Bryan 整理成 R 包，统计教学里常用来讲趋势与分组对比。
+source:
+  name: jennybc/gapminder（数据来自 gapminder.org）
+  url: https://github.com/jennybc/gapminder
+license:
+  name: CC0 1.0
+  url: https://creativecommons.org/publicdomain/zero/1.0/
+anchor_year: 2007
+
+tables:
+  gapminder:
+    label: 国家发展指标
+    description: 每行是一个国家在一个观测年份的人口、预期寿命和人均 GDP
+    synonyms: [国家, 人口, 寿命, 大洲]
+    columns:
+      country: 国家或地区英文名
+      country_zh: {label: 国家或地区, description: 中文名，如 中国、印度、美国、日本, synonyms: [国家]}
+      iso_code: ISO 国家代码
+      continent: 大洲英文名
+      continent_zh: 大洲
+      year: {label: 年份, description: 每 5 年一个观测值}
+      life_expectancy: {label: 预期寿命（岁）, synonyms: [寿命, 平均寿命]}
+      population: {label: 人口, synonyms: [人口数]}
+      gdp_per_capita: {label: 人均 GDP, description: 经通胀调整的美元}
+
+rules:
+  - 每 5 年一个观测值：1952、1957……2007，没有中间年份；问“近十年”时取 1997、2002、2007 三个观测年。
+  - 大洲的平均预期寿命按人口加权：SUM(life_expectancy × population) / SUM(population)；简单平均会放大小国的权重，使用时要在口径里说明。
+  - 展示国家名用 country_zh；按国家过滤时 country_zh 与 country 都可以。
+  - 数据只含 142 个国家或地区，各大洲人口合计不等于世界总人口。
+
+suggestions:
+  - 2007 年人均 GDP 最高的 10 个国家
+  - 中国和印度的预期寿命变化
+  - 2007 年各大洲的人口合计
+  - 1952 年到 2007 年预期寿命提高最多的 10 个国家
+  - 2007 年各大洲按人口加权的平均预期寿命
+  - 2007 年人均 GDP 超过 3 万美元的国家有哪些

@@ -1,0 +1,40 @@
+"""语义层解析与编译共用的测试问题。每条都必须能解析、编译、通过安全门并在演示库上执行。"""
+
+# 一行一题，方便按问题检索和对比期望计划
+# fmt: off
+PARSE_CASES = [
+    ("统计企业经营状态分布", dict(entity="enterprise", mode="group", metrics=["enterprise_count"], dimensions=["status"], filters=[])),
+    ("按行业统计企业数量 Top 10", dict(entity="enterprise", mode="group", metrics=["enterprise_count"], dimensions=["industry"], limit=10, order="desc")),
+    ("按行业统计企业数量前十", dict(entity="enterprise", mode="group", dimensions=["industry"], limit=10, order="desc")),
+    ("各融资轮次的企业数量", dict(entity="financing", mode="group", metrics=["enterprise_count"], dimensions=["round"])),
+    ("按年份统计招投标数量", dict(entity="bidding", mode="group", metrics=["event_count"], dimensions=["bid_year"], order="time")),
+    ("统计企业地区分布 Top 20", dict(entity="enterprise", mode="group", dimensions=["district"], limit=20)),
+    ("按成立年份统计企业数量趋势", dict(entity="enterprise", mode="group", dimensions=["start_year"], order="time")),
+    ("统计对外投资数量最多的企业 Top 10", dict(entity="investment", mode="group", metrics=["event_count"], dimensions=["company"], limit=10, order="desc")),
+    ("按注册资本区间统计企业数量", dict(entity="enterprise", mode="group", dimensions=["capital_bucket"])),
+    ("广州市存续企业有多少家", dict(entity="enterprise", mode="aggregate", metrics=["enterprise_count"], dimensions=[], filters=["active", "city=4401"])),
+    ("深圳各区的企业数量", dict(entity="enterprise", mode="group", dimensions=["district"], filters=["city=4403"])),
+    ("制造业企业数量", dict(entity="enterprise", mode="aggregate", filters=["industry_section=C"])),
+    ("2023年各月的招投标数量", dict(entity="bidding", mode="group", dimensions=["bid_month"], filters=["bid_year=2023"])),
+    ("近三年每年的融资事件数", dict(entity="financing", mode="group", metrics=["event_count"], dimensions=["financing_year"], filters=["financing_year>=2024"])),
+    ("2020年以来有融资记录的企业数量", dict(entity="enterprise", mode="aggregate", filters=["has_financing"])),
+    ("有融资但没有招投标记录的企业有哪些", dict(entity="enterprise", mode="list", filters=["has_financing", "no_bidding"])),
+    ("成立超过20年且有融资记录的企业", dict(entity="enterprise", mode="list", filters=["age>=20", "has_financing"])),
+    ("成立超过二十年的企业数量", dict(entity="enterprise", mode="aggregate", filters=["age>=20"])),
+    ("各城市的招投标记录数", dict(entity="bidding", mode="group", metrics=["event_count"], dimensions=["bid_city"])),
+    ("哪家企业的招投标记录最多", dict(entity="bidding", mode="group", dimensions=["company"], limit=1, order="desc")),
+    ("天使轮融资的企业有多少家", dict(entity="financing", mode="aggregate", metrics=["enterprise_count"], filters=["round=天使轮"])),
+    ("各行业门类的平均注册资本", dict(entity="enterprise", mode="group", metrics=["avg_capital"], dimensions=["industry_section"])),
+    ("有效资质的数量按年份分布", dict(entity="qualification", mode="group", metrics=["event_count"], dimensions=["qual_year"], filters=["valid_qualification"])),
+    ("被投企业已注销的对外投资记录有多少条", dict(entity="investment", mode="aggregate", metrics=["event_count"], filters=["target_cancelled"])),
+    ("天河区有融资记录的企业名单", dict(entity="enterprise", mode="list", filters=["district=440106", "has_financing"])),
+    ("注册资本超过1000万的存续企业数量", dict(entity="enterprise", mode="aggregate", filters=["active", "capital>1000"])),
+    ("注册资本最高的10家企业", dict(entity="enterprise", mode="list", limit=10, order="desc")),
+    ("各融资轮次的融资金额合计", dict(entity="financing", mode="group", metrics=["financing_amount"], dimensions=["round"])),
+    ("佛山市各企业类型的企业数量占比", dict(entity="enterprise", mode="group", dimensions=["econ_kind"], filters=["city=4406"], share=True)),
+    ("按项目所在城市统计2025年招投标项目金额", dict(entity="bidding", mode="group", metrics=["bid_amount"], dimensions=["bid_city"], filters=["bid_year=2025"])),
+    ("资质状态分布", dict(entity="qualification", mode="group", dimensions=["qual_state"])),
+    ("2023年获得天使轮融资的企业", dict(entity="financing", mode="list", filters=["financing_year=2023", "round=天使轮"])),
+    ("软件和信息技术服务业的企业有多少家", dict(entity="enterprise", mode="aggregate", filters=["industry_division=I65"])),
+]
+# fmt: on

@@ -1,0 +1,139 @@
+id: chinook
+kind: open
+title: Chinook 数字音乐商店
+tagline: 发票 · 曲目 · 流派 · 艺人 · 客户
+summary: >-
+  一家在线音乐商店 2021 年至 2025 年的销售数据：412 张发票、2240 条发票明细、3503 首曲目、59 个客户，
+  覆盖 24 个国家。常被用作 Northwind 的替代样例库，表间关联层级更深（发票 → 明细 → 曲目 → 专辑 → 艺人）。
+source:
+  name: lerocha/chinook-database
+  url: https://github.com/lerocha/chinook-database
+license:
+  name: MIT
+  url: https://github.com/lerocha/chinook-database/blob/master/LICENSE.md
+anchor_year: 2025
+
+tables:
+  Invoice:
+    label: 发票
+    synonyms: [销售额, 收入, 消费, 购买, 订单]
+    description: 每行一张发票（一次购买），Total 是发票金额
+    columns:
+      InvoiceId: 发票编号
+      CustomerId: 客户编号
+      InvoiceDate: 开票日期
+      BillingCity: 账单城市
+      BillingState: 账单州或省
+      BillingCountry: 账单国家
+      Total: {label: 发票金额, description: 美元}
+  InvoiceLine:
+    label: 发票明细
+    synonyms: [销售额, 销量, 收入, 卖出]
+    description: 每行是一张发票里购买的一首曲目
+    columns:
+      InvoiceLineId: 明细编号
+      InvoiceId: 发票编号
+      TrackId: 曲目编号
+      UnitPrice: {label: 成交单价, description: 美元}
+      Quantity: 数量
+  Track:
+    label: 曲目
+    synonyms: [歌曲, 单曲, 音乐, 时长]
+    columns:
+      TrackId: 曲目编号
+      Name: 曲目名称
+      AlbumId: 专辑编号
+      MediaTypeId: 媒体格式编号
+      GenreId: 流派编号
+      Composer: 作曲
+      Milliseconds: {label: 时长（毫秒）, description: 换算成分钟要除以 60000}
+      Bytes: 文件大小（字节）
+      UnitPrice: {label: 标价, description: 美元}
+  Album:
+    label: 专辑
+    synonyms: [唱片]
+    columns:
+      AlbumId: 专辑编号
+      Title: 专辑名称
+      ArtistId: 艺人编号
+  Artist:
+    label: 艺人
+    synonyms: [歌手, 乐队, 艺术家]
+    columns:
+      ArtistId: 艺人编号
+      Name: 艺人名称
+  Genre:
+    label: 流派
+    synonyms: [音乐流派, 风格, 音乐类型]
+    columns:
+      GenreId: 流派编号
+      Name: 流派名称
+  MediaType:
+    label: 媒体格式
+    synonyms: [文件格式]
+    columns:
+      MediaTypeId: 媒体格式编号
+      Name: 媒体格式名称
+  Playlist:
+    label: 播放列表
+    synonyms: [歌单]
+    columns:
+      PlaylistId: 播放列表编号
+      Name: 播放列表名称
+  PlaylistTrack:
+    label: 播放列表曲目
+    columns:
+      PlaylistId: 播放列表编号
+      TrackId: 曲目编号
+  Customer:
+    label: 客户
+    synonyms: [顾客, 用户]
+    columns:
+      CustomerId: 客户编号
+      FirstName: 名
+      LastName: 姓
+      Company: 公司
+      City: 城市
+      State: 州或省
+      Country: 国家
+      SupportRepId: {label: 客服代表员工编号, role: dimension}
+  Employee:
+    label: 员工
+    synonyms: [客服, 客服代表, 销售代表]
+    columns:
+      EmployeeId: 员工编号
+      LastName: 姓
+      FirstName: 名
+      Title: 职务
+      ReportsTo: {label: 上级员工编号, role: dimension}
+      BirthDate: 出生日期
+      HireDate: 入职日期
+      City: 城市
+      State: 州或省
+      Country: 国家
+
+relationships:
+  - {from: Invoice.CustomerId, to: Customer.CustomerId, cardinality: many_to_one}
+  - {from: InvoiceLine.InvoiceId, to: Invoice.InvoiceId, cardinality: many_to_one}
+  - {from: InvoiceLine.TrackId, to: Track.TrackId, cardinality: many_to_one}
+  - {from: Track.AlbumId, to: Album.AlbumId, cardinality: many_to_one}
+  - {from: Track.GenreId, to: Genre.GenreId, cardinality: many_to_one}
+  - {from: Track.MediaTypeId, to: MediaType.MediaTypeId, cardinality: many_to_one}
+  - {from: Album.ArtistId, to: Artist.ArtistId, cardinality: many_to_one}
+  - {from: PlaylistTrack.PlaylistId, to: Playlist.PlaylistId, cardinality: many_to_one}
+  - {from: PlaylistTrack.TrackId, to: Track.TrackId, cardinality: many_to_one}
+  - {from: Customer.SupportRepId, to: Employee.EmployeeId, cardinality: many_to_one, note: 负责该客户的客服代表}
+  - {from: Employee.ReportsTo, to: Employee.EmployeeId, cardinality: many_to_one, note: 上级}
+
+rules:
+  - 按发票、客户、国家、时间统计销售额用 Invoice.Total；按曲目、专辑、艺人、流派统计销售额用 InvoiceLine.UnitPrice × Quantity。每张发票的 Total 等于其明细金额之和。
+  - 开票时间以 Invoice.InvoiceDate 为准，数据覆盖 2021-01-01 至 2025-12-22。
+  - 客户或员工姓名展示为 FirstName 与 LastName 拼接。
+
+suggestions:
+  - 各国家的销售额，前 10 名
+  - 哪个音乐流派的销售额最高
+  - 按年统计销售额和发票数
+  - 每位客服代表负责的客户数和带来的销售额
+  - 销售额最高的 10 位艺人
+  - 各流派曲目的平均时长（分钟）

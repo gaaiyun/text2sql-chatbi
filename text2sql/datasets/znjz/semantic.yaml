@@ -1,0 +1,818 @@
+# znjz 智能制造企业数据库 · 语义层
+#
+# 这份文件是“业务口径”的唯一出处：
+#   - 语义层路径：规则解析器把问题映射到这里的实体/指标/维度/过滤，由编译器生成 SQL；
+#   - LLM 路径：tables/rules/relationships 渲染进提示词，value_hint 与真实取值一起注入；
+#   - SQL 安全门：whitelist 与 sensitive_columns 来自这里。
+# 修改任何口径后运行 `python -m pytest tests/test_catalog.py`，validate() 会按生产 DDL 逐列核对。
+
+version: 1
+dataset: znjz
+title: 智能制造企业数据库
+description: 广东智能制造相关企业的工商登记、行业分类、融资、对外投资、招投标与资质标签数据。
+anchor_year: 2026          # “今年 / 近三年”的锚定年份：数据截止到 2026 年上半年
+anchor_partial: true       # 锚定年份只有半年数据，趋势结果的最后一期要提示不完整
+default_list_limit: 20     # 名单类问题未指定数量时返回的行数
+default_top_limit: 10      # “最多的企业”未指定数量时返回的行数
+
+sensitive_columns: [oper_name, oper_name_id, invest_oper_name]
+
+# 领域词：问题一个都不沾时判定为领域外问题（上传的数据集设 open: true，不做这一判断）
+domain:
+  open: false
+  topics: 企业数量、行业分布、融资轮次、招投标趋势、资质状态
+  words: [企业, 公司, 行业, 产业, 融资, 投资, 招投标, 投标, 中标, 资质, 注册资本, 成立, 地区, 城市, 区县, 经营, 存续, 注销, 吊销, 轮次, 项目, 公告, 股权]
+
+# SQL 智能体的表召回补充规则
+linking:
+  # 一张表都没命中时，把全部分析视图交给模型（宽表不在其中）
+  fallback: [企业基本信息, 企业行业代码, 融资数据, 投资数据, 招投标, 标签数据]
+  # 事件表命中、问题又需要企业属性时，补上企业主表用于关联；宽表独有字段也以它为参照
+  anchor:
+    table: 企业基本信息
+    terms: [企业, 公司, 名称, 城市, 地区, 区县, 注册资本, 成立, 经营状态, 存续, 注销, 吊销, 企业类型]
+    reason: 问题需要企业属性，补充企业主表用于关联
+  companions:
+    - table: 企业行业代码
+      terms: [行业, 产业, 门类, 制造业, 建筑业, 信息技术, 科技服务, 软件]
+      reason: 问题涉及行业，补充行业视图
+
+# 注入 LLM 提示词的业务规则。语义层路径由编译器保证，不依赖这些文字。
+rules:
+  - 统计企业数量用 COUNT(DISTINCT eid)；统计融资、投资、招投标、资质等事件数量用 COUNT(*)。
+  - 融资、投资、招投标、资质分析优先使用视图 `融资数据`、`投资数据`、`招投标`、`标签数据`。直接使用宽表时必须过滤 cf_id / cinv_id / cbid_id / ct_id IS NOT NULL，否则没有事件的企业的占位行会被计入。
+  - 企业经营状态 status 的真实取值是长文本，例如 '存续（在营、开业、在册）'，不存在 '存续' 这样的短值。按关键词用 LIKE 匹配：存续用 status LIKE '存续%'，注销用 LIKE '%注销%'，吊销用 LIKE '%吊销%'。
+  - 库中没有行业名称表和行政区划名称表。行业用 industry_code（GB/T 4754，首字母为门类，前三位为大类），地区用六位行政区划代码（前四位为地市，4401 广州、4403 深圳、4406 佛山、4419 东莞）。
+  - 招投标 area_code、资质 district_code 等代码列从浮点导入，带 '.0' 后缀（如 '440300.0'），等值比较会匹配不到，按前缀用 LIKE '4403%' 匹配。
+  - 投资数据中 eid 是投资方企业，invest_eid / invest_name 是被投资企业；stock_percent 是 0 到 1 的比例，展示百分比时乘以 100。
+  - 注册资本 regist_capi_new 单位为万元；融资金额 amount 为空时可用估算金额 estimated_amount 补齐；project_bid_money 单位以源数据为准，跨表汇总金额前必须说明口径。
+  - 企业详情类问题先在子查询中按 eid 聚合各事件表，再关联企业主表，避免多个一对多表直接 JOIN 放大行数。
+  - 招投标记录包含招标、采购、结果等多类公告，库中没有“是否中标”字段，问“中标”时按全部招投标记录统计并说明口径。
+
+# 表别名：语义层表达式里的 alias.column 必须能按这里找到真实的表和列
+aliases:
+  e: 企业基本信息
+  i: 企业行业代码
+  f: 融资数据
+  v: 投资数据
+  b: 招投标
+  q: 标签数据
+  fx: 融资数据
+  vx: 投资数据
+  bx: 招投标
+  qx: 标签数据
+
+tables:
+  企业基本信息:
+    kind: table
+    label: 企业主表
+    description: 企业工商登记主档，是所有分析的维表。
+    grain: 一行一个企业，eid 唯一
+    synonyms: [企业信息, 工商信息, 企业主表, 经营状态, 注册资本, 成立日期, 企业类型, 登记地区]
+    columns:
+      eid: {label: 企业ID, role: id, description: 企业唯一标识（UUID），跨表关联键}
+      name: {label: 企业名称, role: text, synonyms: [企业名称, 公司名称, 名称]}
+      status: {label: 经营状态, role: dimension, synonyms: [经营状态, 登记状态, 存续, 注销, 吊销], scan_values: true, value_hint: "长文本取值，如 '存续（在营、开业、在册）'；用 LIKE '存续%' 匹配"}
+      new_status_code: {label: 经营状态代码, role: dimension}
+      econ_kind: {label: 企业类型, role: dimension, synonyms: [企业类型, 经济类型, 公司类型, 经济性质], scan_values: true}
+      regist_capi_new: {label: 注册资本（万元）, role: metric, synonyms: [注册资本, 资本规模]}
+      regist_capi: {label: 注册资本原文, role: text, description: 带单位的原始文本，如 '100万元人民币'，不适合计算}
+      actual_capi: {label: 实缴资本（万元）, role: metric, description: 约七成为空}
+      currency_unit: {label: 注册资本币种, role: dimension, scan_values: true}
+      start_date: {label: 成立日期, role: time, synonyms: [成立日期, 成立时间, 成立年份, 注册时间]}
+      district_code: {label: 登记地区代码, role: dimension, synonyms: [登记地区, 地区, 区县, 城市], value_hint: "六位行政区划代码，不带 .0 后缀；前四位为地市"}
+      province_code: {label: 省份代码, role: dimension}
+      belong_org: {label: 登记机关, role: text}
+      scope: {label: 经营范围, role: text, synonyms: [经营范围, 业务范围, 主营业务]}
+      logout_date: {label: 注销日期, role: time}
+      logout_reason: {label: 注销原因, role: text}
+      revoke_date: {label: 吊销日期, role: time}
+      credit_no: {label: 统一社会信用代码, role: id}
+      oper_name: {label: 法定代表人, role: text, description: 个人信息，禁止查询}
+
+  企业基本信息_行业代码:
+    kind: table
+    label: 企业行业宽表
+    description: 企业主档附加行业代码列。只需要行业代码时优先用视图 企业行业代码。
+    grain: 一行一个企业，eid 唯一
+    prefer: 企业行业代码
+    columns:
+      eid: {label: 企业ID, role: id}
+      name: {label: 企业名称, role: text}
+      industry_code: {label: 行业代码, role: dimension}
+      status: {label: 经营状态, role: dimension}
+      district_code: {label: 登记地区代码, role: dimension}
+
+  企业融资信息:
+    kind: table
+    label: 融资宽表
+    description: 企业主档与融资事件左连接后的宽表，包含没有融资的企业的占位行。
+    grain: 一行一个企业或一个融资事件；只有 cf_id 非空的行是真实融资事件
+    prefer: 融资数据
+    columns:
+      eid: {label: 企业ID, role: id}
+      name: {label: 企业名称, role: text}
+      cf_id: {label: 融资事件ID, role: id, description: 为空表示该行是无融资企业的占位行}
+      cf_eid: {label: 融资企业ID, role: id}
+      ename: {label: 融资企业名称, role: text}
+      round: {label: 融资轮次, role: dimension}
+      round_date: {label: 融资日期, role: time}
+      amount: {label: 融资金额, role: metric}
+      estimated_amount: {label: 估算融资金额, role: metric}
+      post_money: {label: 投后估值, role: metric}
+      newstitle: {label: 融资新闻标题, role: text}
+
+  企业投资股东信息:
+    kind: table
+    label: 对外投资宽表
+    description: 企业对外投资记录宽表，包含没有对外投资的企业的占位行。
+    grain: 一行一个企业或一条投资记录；只有 cinv_id 非空的行是真实投资记录
+    prefer: 投资数据
+    columns:
+      name: {label: 投资方企业名称, role: text}
+      cinv_id: {label: 投资记录ID, role: id, description: 为空表示占位行}
+      cinv_eid: {label: 投资方企业ID, role: id}
+      invest_eid: {label: 被投企业ID, role: id}
+      invest_name: {label: 被投企业名称, role: text}
+      invest_status: {label: 被投企业经营状态, role: dimension}
+      stock_percent: {label: 持股比例, role: metric, description: 0 到 1 的比例}
+      should_capi_conv: {label: 认缴出资额（换算）, role: metric, description: 只在宽表中存在，视图 投资数据 没有这一列}
+      real_capi: {label: 实缴出资额, role: metric}
+      cinv_is_history: {label: 是否历史投资, role: dimension}
+
+  招投标信息:
+    kind: table
+    label: 招投标宽表
+    description: 企业招投标记录宽表，包含没有招投标记录的企业的占位行。
+    grain: 一行一个企业或一条招投标记录；只有 cbid_id 非空的行是真实记录
+    prefer: 招投标
+    columns:
+      name: {label: 企业名称, role: text}
+      cbid_id: {label: 招投标记录ID, role: id, description: 为空表示占位行}
+      cbid_eid: {label: 企业ID, role: id}
+      role1: {label: 企业角色代码, role: dimension, scan_values: true, description: 企业在公告中的角色代码，只在宽表中存在}
+      title: {label: 公告标题, role: text}
+      publish_time: {label: 发布时间, role: time}
+      area_code: {label: 项目地区代码, role: dimension}
+      project_bid_money: {label: 项目金额, role: metric}
+
+  商标资质信息:
+    kind: table
+    label: 资质标签宽表
+    description: 企业资质、荣誉、认证类标签宽表，包含没有资质的企业的占位行。
+    grain: 一行一个企业或一条资质记录；只有 ct_id 非空的行是真实记录
+    prefer: 标签数据
+    columns:
+      name: {label: 企业名称, role: text}
+      ct_id: {label: 资质记录ID, role: id, description: 为空表示占位行}
+      ct_eid: {label: 企业ID, role: id}
+      ct_type: {label: 资质类型代码, role: dimension}
+      ct_year: {label: 资质年份, role: time}
+      ct_state: {label: 资质状态, role: dimension}
+      ct_district_code: {label: 资质地区代码, role: dimension}
+
+  企业行业代码:
+    kind: view
+    label: 企业行业
+    description: 每家企业的国民经济行业代码（GB/T 4754-2017）。
+    grain: 一行一个企业
+    synonyms: [行业, 行业代码, 产业, 行业分类, 细分行业, 门类]
+    columns:
+      eid: {label: 企业ID, role: id}
+      name: {label: 企业名称, role: text}
+      industry_code: {label: 行业代码, role: dimension, synonyms: [行业, 行业代码, 产业], value_hint: "如 'I6531'；首字母为门类（C 制造业、E 建筑业、I 信息技术服务、M 科技服务），前三位为大类"}
+
+  融资数据:
+    kind: view
+    label: 融资事件
+    description: 已过滤占位行的融资事件，eid 为获得融资的企业。
+    grain: 一行一个融资事件
+    synonyms: [融资, 融资事件, 融资记录, 融资轮次, 投资机构, 投融资]
+    columns:
+      eid: {label: 企业ID, role: id}
+      id: {label: 融资事件ID, role: id}
+      ename: {label: 企业名称, role: text}
+      round: {label: 融资轮次, role: dimension, synonyms: [轮次, 融资轮次], scan_values: true}
+      round_type: {label: 轮次类型代码, role: dimension}
+      round_date: {label: 融资日期, role: time, synonyms: [融资时间, 融资日期]}
+      amount: {label: 融资金额, role: metric, synonyms: [融资金额], description: 约六成为空}
+      estimated_amount: {label: 估算融资金额, role: metric}
+      currency: {label: 币种, role: dimension, scan_values: true}
+      investors: {label: 投资方, role: text, synonyms: [投资机构, 投资方, 投资人]}
+      publish_date: {label: 公告日期, role: time}
+
+  投资数据:
+    kind: view
+    label: 对外投资
+    description: 已过滤占位行的对外投资记录；eid 是投资方，invest_eid/invest_name 是被投企业。
+    grain: 一行一条投资记录
+    synonyms: [对外投资, 投资记录, 股权投资, 被投企业, 参股, 持股]
+    columns:
+      eid: {label: 投资方企业ID, role: id}
+      id: {label: 投资记录ID, role: id}
+      name: {label: 投资方企业名称, role: text}
+      invest_eid: {label: 被投企业ID, role: id}
+      invest_name: {label: 被投企业名称, role: text, synonyms: [被投企业, 被投资企业]}
+      invest_status: {label: 被投企业经营状态, role: dimension, scan_values: true, value_hint: "长文本取值，如 '存续（在营、开业、在册）'、'吊销，已注销'；用 LIKE 匹配"}
+      invest_start_date: {label: 被投企业成立日期, role: time, description: 不是投资发生日期}
+      stock_percent: {label: 持股比例, role: metric, synonyms: [持股比例, 股比], description: 0 到 1 的比例}
+      real_capi: {label: 实缴出资额, role: metric}
+
+  招投标:
+    kind: view
+    label: 招投标记录
+    description: 已过滤占位行的招投标公告记录，eid 为参与企业。
+    grain: 一行一条招投标公告记录
+    synonyms: [招投标, 投标, 中标, 招标, 采购, 公告, 项目]
+    columns:
+      eid: {label: 企业ID, role: id}
+      id: {label: 招投标记录ID, role: id}
+      title: {label: 公告标题, role: text, synonyms: [标题, 项目名称]}
+      publish_time: {label: 发布时间, role: time, synonyms: [发布时间, 公告时间]}
+      area_code: {label: 项目地区代码, role: dimension, synonyms: [项目地区, 项目所在地], value_hint: "带 .0 后缀，如 '440300.0'；按前缀 LIKE '4403%' 匹配"}
+      notice_type_main: {label: 公告主类型代码, role: dimension, scan_values: true}
+      notice_type_sub: {label: 公告子类型代码, role: dimension}
+      project_number: {label: 项目编号, role: text}
+      project_bid_money: {label: 项目金额, role: metric, synonyms: [项目金额, 中标金额, 预算金额], description: 约七成为空，单位以源数据为准}
+
+  标签数据:
+    kind: view
+    label: 资质标签
+    description: 已过滤占位行的资质、荣誉、认证记录。
+    grain: 一行一条资质记录
+    synonyms: [资质, 标签, 荣誉, 认证, 资质证书]
+    columns:
+      eid: {label: 企业ID, role: id}
+      id: {label: 资质记录ID, role: id}
+      name: {label: 企业名称, role: text}
+      type: {label: 资质类型代码, role: dimension, scan_values: true}
+      level: {label: 资质级别代码, role: dimension, scan_values: true}
+      year: {label: 资质年份, role: time, description: 浮点存储，如 2023.0}
+      publish_date: {label: 发布日期, role: time}
+      state: {label: 资质状态, role: dimension, synonyms: [资质状态, 有效, 过期], scan_values: true}
+      district: {label: 资质地区名称, role: text, description: 自由文本，写法不统一（广州 / 广州市 / 广东省广州市天河区）}
+      district_code: {label: 资质地区代码, role: dimension, value_hint: "带 .0 后缀，按前缀匹配"}
+      valid_start: {label: 有效期开始, role: text}
+      valid_end: {label: 有效期结束, role: text}
+
+relationships:
+  - {from: 企业行业代码.eid, to: 企业基本信息.eid, cardinality: one_to_one}
+  - {from: 融资数据.eid, to: 企业基本信息.eid, cardinality: many_to_one}
+  - {from: 投资数据.eid, to: 企业基本信息.eid, cardinality: many_to_one, note: 投资方}
+  - {from: 投资数据.invest_eid, to: 企业基本信息.eid, cardinality: many_to_one, note: 被投企业，只有部分在库内}
+  - {from: 招投标.eid, to: 企业基本信息.eid, cardinality: many_to_one}
+  - {from: 标签数据.eid, to: 企业基本信息.eid, cardinality: many_to_one}
+
+code_tables:
+  city:
+    "4401": 广州市
+    "4402": 韶关市
+    "4403": 深圳市
+    "4404": 珠海市
+    "4405": 汕头市
+    "4406": 佛山市
+    "4407": 江门市
+    "4408": 湛江市
+    "4409": 茂名市
+    "4412": 肇庆市
+    "4413": 惠州市
+    "4414": 梅州市
+    "4415": 汕尾市
+    "4416": 河源市
+    "4417": 阳江市
+    "4418": 清远市
+    "4419": 东莞市
+    "4420": 中山市
+    "4451": 潮州市
+    "4452": 揭阳市
+    "4453": 云浮市
+  district:
+    "440103": 荔湾区
+    "440104": 越秀区
+    "440105": 海珠区
+    "440106": 天河区
+    "440111": 白云区
+    "440112": 黄埔区
+    "440113": 番禺区
+    "440114": 花都区
+    "440115": 南沙区
+    "440117": 从化区
+    "440118": 增城区
+    "440303": 罗湖区
+    "440304": 福田区
+    "440305": 南山区
+    "440306": 宝安区
+    "440307": 龙岗区
+    "440308": 盐田区
+    "440309": 龙华区
+    "440310": 坪山区
+    "440311": 光明区
+    "440402": 香洲区
+    "440403": 斗门区
+    "440404": 金湾区
+    "440604": 禅城区
+    "440605": 南海区
+    "440606": 顺德区
+    "440607": 三水区
+    "440608": 高明区
+    "441302": 惠城区
+    "441303": 惠阳区
+  industry_section:
+    A: 农、林、牧、渔业
+    B: 采矿业
+    C: 制造业
+    D: 电力、热力、燃气及水生产和供应业
+    E: 建筑业
+    F: 批发和零售业
+    G: 交通运输、仓储和邮政业
+    H: 住宿和餐饮业
+    I: 信息传输、软件和信息技术服务业
+    J: 金融业
+    K: 房地产业
+    L: 租赁和商务服务业
+    M: 科学研究和技术服务业
+    N: 水利、环境和公共设施管理业
+    O: 居民服务、修理和其他服务业
+    P: 教育
+    Q: 卫生和社会工作
+    R: 文化、体育和娱乐业
+    S: 公共管理、社会保障和社会组织
+    T: 国际组织
+  industry_division:
+    C34: 通用设备制造业
+    C35: 专用设备制造业
+    C38: 电气机械和器材制造业
+    C39: 计算机、通信和其他电子设备制造业
+    C40: 仪器仪表制造业
+    E47: 房屋建筑业
+    E48: 土木工程建筑业
+    E49: 建筑安装业
+    E50: 建筑装饰、装修和其他建筑业
+    F51: 批发业
+    I64: 互联网和相关服务
+    I65: 软件和信息技术服务业
+    L71: 租赁业
+    L72: 商务服务业
+    M73: 研究和试验发展
+    M74: 专业技术服务业
+    M75: 科技推广和应用服务业
+
+entities:
+  enterprise:
+    label: 企业
+    table: 企业基本信息
+    alias: e
+    synonyms: [企业, 公司, 厂商, 市场主体]
+    default_metric: enterprise_count
+    time_dimension: start_year
+    joins:
+      i: "LEFT JOIN `企业行业代码` i ON i.`eid` = e.`eid`"
+    list_columns:
+      - {sql: "e.`name`", label: 企业名称}
+      - {sql: "e.`district_code`", label: 登记地区代码}
+      - {sql: "e.`start_date`", label: 成立日期}
+      - {sql: "e.`regist_capi_new`", label: 注册资本（万元）}
+      - {sql: "e.`status`", label: 经营状态}
+    list_order: "e.`regist_capi_new` DESC, e.`name`"
+    list_order_note: 名单默认按注册资本从高到低排列。
+  financing:
+    label: 融资事件
+    table: 融资数据
+    alias: f
+    synonyms: [融资, 融资事件, 融资记录, 投融资]
+    default_metric: event_count
+    time_dimension: financing_year
+    joins:
+      e: "JOIN `企业基本信息` e ON e.`eid` = f.`eid`"
+      i: "LEFT JOIN `企业行业代码` i ON i.`eid` = f.`eid`"
+    list_columns:
+      - {sql: "f.`ename`", label: 企业名称}
+      - {sql: "f.`round`", label: 融资轮次}
+      - {sql: "f.`round_date`", label: 融资日期}
+      - {sql: "COALESCE(f.`amount`, f.`estimated_amount`)", label: 融资金额}
+    list_order: "f.`round_date` DESC, f.`ename`"
+    list_order_note: 名单默认按融资日期从新到旧排列。
+  investment:
+    label: 对外投资记录
+    table: 投资数据
+    alias: v
+    synonyms: [对外投资, 投资记录, 参股, 被投企业, 被投资企业]
+    default_metric: event_count
+    time_dimension: null
+    joins:
+      e: "JOIN `企业基本信息` e ON e.`eid` = v.`eid`"
+      i: "LEFT JOIN `企业行业代码` i ON i.`eid` = v.`eid`"
+    list_columns:
+      - {sql: "v.`name`", label: 投资方}
+      - {sql: "v.`invest_name`", label: 被投企业}
+      - {sql: "ROUND(v.`stock_percent` * 100, 2)", label: 持股比例（%）}
+      - {sql: "v.`invest_status`", label: 被投企业经营状态}
+    list_order: "v.`stock_percent` DESC, v.`invest_name`"
+    list_order_note: 名单默认按持股比例从高到低排列。
+  bidding:
+    label: 招投标记录
+    table: 招投标
+    alias: b
+    synonyms: [招投标, 投标, 中标, 招标, 采购公告, 项目公告, 公告, 项目]
+    default_metric: event_count
+    time_dimension: bid_year
+    assumption: 招投标记录包含招标、采购与结果等各类公告，库中没有“是否中标”字段，按全部记录统计。
+    joins:
+      e: "JOIN `企业基本信息` e ON e.`eid` = b.`eid`"
+      i: "LEFT JOIN `企业行业代码` i ON i.`eid` = b.`eid`"
+    list_columns:
+      - {sql: "e.`name`", label: 企业名称}
+      - {sql: "b.`title`", label: 公告标题}
+      - {sql: "b.`publish_time`", label: 发布时间}
+      - {sql: "b.`project_bid_money`", label: 项目金额}
+    list_requires: [e]
+    list_order: "b.`publish_time` DESC, b.`id`"
+    list_order_note: 名单默认按发布时间从新到旧排列。
+  qualification:
+    label: 资质记录
+    table: 标签数据
+    alias: q
+    synonyms: [资质, 资质标签, 荣誉, 认证, 资质证书, 商标资质, 商标]
+    default_metric: event_count
+    time_dimension: qual_year
+    joins:
+      e: "JOIN `企业基本信息` e ON e.`eid` = q.`eid`"
+      i: "LEFT JOIN `企业行业代码` i ON i.`eid` = q.`eid`"
+    list_columns:
+      - {sql: "q.`name`", label: 企业名称}
+      - {sql: "CAST(q.`year` AS SIGNED)", label: 资质年份}
+      - {sql: "q.`state`", label: 资质状态}
+      - {sql: "q.`valid_end`", label: 有效期结束}
+    list_order: "q.`year` DESC, q.`name`"
+    list_order_note: 名单默认按资质年份从新到旧排列。
+
+# 企业详情：主档字段 + 各事件表的计数。先在相关子查询里按 eid 计数，避免多个一对多表 JOIN 放大行数
+detail:
+  columns:
+    - {sql: "e.`name`", label: 企业名称}
+    - {sql: "e.`status`", label: 经营状态}
+    - {sql: "e.`start_date`", label: 成立日期}
+    - {sql: "e.`regist_capi_new`", label: 注册资本（万元）}
+    - {sql: "e.`district_code`", label: 登记地区代码}
+    - {sql: "e.`econ_kind`", label: 企业类型}
+    - {sql: "i.`industry_code`", label: 行业代码}
+    - {sql: "(SELECT COUNT(*) FROM `融资数据` fx WHERE fx.`eid` = e.`eid`)", label: 融资事件数}
+    - {sql: "(SELECT COUNT(*) FROM `投资数据` vx WHERE vx.`eid` = e.`eid`)", label: 对外投资记录数}
+    - {sql: "(SELECT COUNT(*) FROM `招投标` bx WHERE bx.`eid` = e.`eid`)", label: 招投标记录数}
+    - {sql: "(SELECT COUNT(*) FROM `标签数据` qx WHERE qx.`eid` = e.`eid`)", label: 资质数量}
+  requires: [i]
+  order: "e.`name`"
+  limit: 5
+
+metrics:
+  enterprise_count:
+    label: 企业数量
+    synonyms: [企业数量, 企业数, 公司数量, 公司数, 多少家企业, 多少家公司, 多少家, 几家, 家数]
+    sql:
+      enterprise: "COUNT(DISTINCT e.`eid`)"
+      financing: "COUNT(DISTINCT f.`eid`)"
+      investment: "COUNT(DISTINCT v.`eid`)"
+      bidding: "COUNT(DISTINCT b.`eid`)"
+      qualification: "COUNT(DISTINCT q.`eid`)"
+  event_count:
+    label: 记录数
+    labels:
+      financing: 融资事件数
+      investment: 对外投资记录数
+      bidding: 招投标记录数
+      qualification: 资质数量
+    synonyms: [次数, 笔数, 条数, 记录数, 事件数, 多少次, 多少笔, 多少条]
+    sql:
+      financing: "COUNT(*)"
+      investment: "COUNT(*)"
+      bidding: "COUNT(*)"
+      qualification: "COUNT(*)"
+  avg_capital:
+    label: 平均注册资本（万元）
+    synonyms: [平均注册资本, 注册资本均值, 人均注册资本]
+    sql:
+      enterprise: "ROUND(AVG(e.`regist_capi_new`), 2)"
+  total_capital:
+    label: 注册资本合计（万元）
+    synonyms: [注册资本总额, 注册资本合计, 总注册资本, 注册资本总和]
+    sql:
+      enterprise: "ROUND(SUM(e.`regist_capi_new`), 2)"
+  max_capital:
+    label: 最高注册资本（万元）
+    synonyms: [最高注册资本, 最大注册资本]
+    sql:
+      enterprise: "MAX(e.`regist_capi_new`)"
+  financing_amount:
+    label: 融资金额合计
+    synonyms: [融资金额, 融资总额, 融资规模, 融资金额合计]
+    sql:
+      financing: "SUM(COALESCE(f.`amount`, f.`estimated_amount`))"
+    assumption: 融资金额优先取 amount，为空时用估算金额 estimated_amount 补齐，币种以源数据为准。
+  bid_amount:
+    label: 项目金额合计
+    synonyms: [项目金额, 中标金额, 招投标金额, 项目总金额, 预算金额]
+    sql:
+      bidding: "ROUND(SUM(b.`project_bid_money`), 2)"
+    assumption: project_bid_money 约七成为空，合计只包含有金额的记录，单位以源数据为准。
+  invested_company_count:
+    label: 被投企业数
+    synonyms: [被投企业数, 被投资企业数, 被投企业数量]
+    sql:
+      investment: "COUNT(DISTINCT v.`invest_eid`)"
+  avg_stock_percent:
+    label: 平均持股比例（%）
+    synonyms: [平均持股比例, 持股比例均值]
+    sql:
+      investment: "ROUND(AVG(v.`stock_percent`) * 100, 2)"
+
+# 泛化计数词：解析到这些词时使用实体的默认指标
+count_words: [数量, 数目, 个数, 多少, 总数, 有几个, 数]
+
+# 同一个词在不同实体下指向不同维度。例如“资质的状态分布”是资质状态，“企业的状态分布”是经营状态；
+# “各城市的招投标数量”按项目所在城市，其余实体按企业登记城市。default 用于没有专门映射的实体。
+scoped_dimension_words:
+  状态: {default: status, qualification: qual_state, investment: invest_status}
+  城市: {default: city, bidding: bid_city}
+  地市: {default: city, bidding: bid_city}
+  各市: {default: city, bidding: bid_city}
+  各城市: {default: city, bidding: bid_city}
+  各个城市: {default: city, bidding: bid_city}
+  地区: {default: district, bidding: bid_city}
+  区域: {default: district, bidding: bid_city}
+  区县: {default: district}
+
+dimensions:
+  status:
+    label: 经营状态
+    synonyms: [经营状态, 登记状态, 企业状态]
+    sql: "e.`status`"
+    requires: [e]
+  econ_kind:
+    label: 企业类型
+    synonyms: [企业类型, 经济类型, 公司类型, 企业性质, 经济性质]
+    sql: "e.`econ_kind`"
+    requires: [e]
+  city:
+    label: 城市
+    synonyms: [登记城市, 注册城市, 企业所在城市, 注册地城市]
+    case: {code_table: city, expr: "SUBSTR(e.`district_code`, 1, 4)"}
+    requires: [e]
+    assumption: 城市按企业登记地（district_code 前四位）划分，不是招投标项目所在地。
+  district:
+    label: 登记地区代码
+    synonyms: [登记地区, 登记区县, 注册地区, 各区]
+    sql: "e.`district_code`"
+    requires: [e]
+    assumption: 按企业登记地区的六位行政区划代码统计，库中没有区县名称表。
+  industry_section:
+    label: 行业门类
+    synonyms: [行业门类, 行业大类, 门类, 大行业]
+    case: {code_table: industry_section, expr: "SUBSTR(i.`industry_code`, 1, 1)"}
+    requires: [i]
+  industry:
+    label: 行业代码
+    synonyms: [行业, 细分行业, 行业代码, 产业, 所属行业]
+    sql: "i.`industry_code`"
+    requires: [i]
+    assumption: 库中没有行业名称表，按 GB/T 4754 行业代码统计。
+  start_year:
+    label: 成立年份
+    synonyms: [成立年份, 注册年份, 成立时间, 成立年度]
+    sql: "YEAR(e.`start_date`)"
+    requires: [e]
+    time: true
+  capital_bucket:
+    label: 注册资本区间
+    synonyms: [注册资本区间, 注册资本分布, 注册资本分档, 注册资本段, 资本规模分布]
+    sql: "CASE WHEN e.`regist_capi_new` IS NULL THEN '未知' WHEN e.`regist_capi_new` < 100 THEN '100万以下' WHEN e.`regist_capi_new` < 500 THEN '100-500万' WHEN e.`regist_capi_new` < 1000 THEN '500-1000万' WHEN e.`regist_capi_new` < 5000 THEN '1000-5000万' ELSE '5000万及以上' END"
+    order_sql: "MIN(COALESCE(e.`regist_capi_new`, -1))"
+    requires: [e]
+    assumption: 注册资本单位为万元，区间左闭右开。
+  company:
+    label: 企业名称
+    # 没有同义词：“哪些企业/最多的企业”由解析器结合排序意图决定是按企业分组还是列名单
+    synonyms: []
+    sql: "e.`name`"
+    group_sql: "e.`eid`, e.`name`"
+    requires: [e]
+  round:
+    label: 融资轮次
+    synonyms: [融资轮次, 轮次, 各轮次, 融资阶段]
+    sql: "f.`round`"
+    requires: [f]
+  financing_year:
+    label: 融资年份
+    synonyms: [融资年份, 融资年度]
+    sql: "YEAR(f.`round_date`)"
+    requires: [f]
+    time: true
+  invest_status:
+    label: 被投企业经营状态
+    synonyms: [被投企业状态, 被投企业经营状态, 被投资企业状态]
+    sql: "v.`invest_status`"
+    requires: [v]
+  bid_year:
+    label: 公告年份
+    synonyms: [公告年份, 发布年份]
+    sql: "YEAR(b.`publish_time`)"
+    requires: [b]
+    time: true
+  bid_month:
+    label: 公告月份
+    synonyms: [月份, 每月, 月度, 各月, 逐月]
+    sql: "DATE_FORMAT(b.`publish_time`, '%Y-%m')"
+    requires: [b]
+    time: true
+  bid_city:
+    label: 项目所在城市
+    synonyms: [项目所在地, 项目地区, 项目城市, 项目所在城市]
+    case: {code_table: city, expr: "SUBSTR(b.`area_code`, 1, 4)"}
+    requires: [b]
+    assumption: 按招投标项目地区代码（area_code 前四位）划分城市，省外项目归入“其他”。
+  qual_year:
+    label: 资质年份
+    synonyms: [资质年份, 获评年份, 认定年份]
+    sql: "CAST(q.`year` AS SIGNED)"
+    requires: [q]
+    time: true
+  qual_state:
+    label: 资质状态
+    synonyms: [资质状态, 有效状态, 有效期状态]
+    sql: "q.`state`"
+    requires: [q]
+  qual_level:
+    label: 资质级别代码
+    synonyms: [资质级别, 资质等级]
+    sql: "q.`level`"
+    requires: [q]
+
+# 泛化时间词：解析到这些词时使用实体的时间维度
+time_words: [年份, 年度, 每年, 各年, 历年, 逐年, 趋势, 变化, 按年]
+
+filters:
+  active:
+    label: 存续企业
+    group: status
+    synonyms: [存续, 在营, 正常经营, 在业, 存续状态]
+    sql: "e.`status` LIKE '存续%'"
+    requires: [e]
+    assumption: “存续”按 status 前缀匹配，真实取值为 '存续（在营、开业、在册）'。
+  cancelled:
+    label: 注销企业
+    group: status
+    synonyms: [注销, 已注销]
+    sql: "e.`status` LIKE '%注销%'"
+    requires: [e]
+    assumption: “注销”匹配所有含“注销”的状态（注销、注销企业、已注销）。
+  revoked:
+    label: 吊销企业
+    group: status
+    synonyms: [吊销, 已吊销]
+    sql: "e.`status` LIKE '%吊销%'"
+    requires: [e]
+  has_financing:
+    label: 有融资记录
+    group: financing_exists
+    synonyms: [有融资记录, 有融资, 获得过融资, 获得融资, 融资过, 拿到融资, 有过融资]
+    sql: "EXISTS (SELECT 1 FROM `融资数据` fx WHERE fx.`eid` = e.`eid`{time})"
+    time_column: "YEAR(fx.`round_date`)"
+    requires: [e]
+  no_financing:
+    label: 没有融资记录
+    group: financing_exists
+    synonyms: [没有融资记录, 没有融资, 无融资, 未融资, 未获得融资, 没有获得融资, 没有获得过融资]
+    sql: "NOT EXISTS (SELECT 1 FROM `融资数据` fx WHERE fx.`eid` = e.`eid`{time})"
+    time_column: "YEAR(fx.`round_date`)"
+    requires: [e]
+  has_bidding:
+    label: 有招投标记录
+    group: bidding_exists
+    synonyms: [有招投标记录, 有招投标, 参与过招投标, 参与招投标, 有投标记录, 参与过投标, 有中标记录, 中过标]
+    sql: "EXISTS (SELECT 1 FROM `招投标` bx WHERE bx.`eid` = e.`eid`{time})"
+    time_column: "YEAR(bx.`publish_time`)"
+    requires: [e]
+  no_bidding:
+    label: 没有招投标记录
+    group: bidding_exists
+    synonyms: [没有招投标记录, 没有招投标, 无招投标, 未参与招投标, 没有参与过招投标, 没有参与招投标, 没有投标记录, 没中过标]
+    sql: "NOT EXISTS (SELECT 1 FROM `招投标` bx WHERE bx.`eid` = e.`eid`{time})"
+    time_column: "YEAR(bx.`publish_time`)"
+    requires: [e]
+  has_investment:
+    label: 有对外投资
+    group: investment_exists
+    synonyms: [有对外投资, 对外投资过, 有投资记录, 有对外投资记录]
+    sql: "EXISTS (SELECT 1 FROM `投资数据` vx WHERE vx.`eid` = e.`eid`)"
+    requires: [e]
+  no_investment:
+    label: 没有对外投资
+    group: investment_exists
+    synonyms: [没有对外投资, 无对外投资, 没有对外投资记录]
+    sql: "NOT EXISTS (SELECT 1 FROM `投资数据` vx WHERE vx.`eid` = e.`eid`)"
+    requires: [e]
+  has_qualification:
+    label: 有资质记录
+    group: qualification_exists
+    synonyms: [有资质, 拥有资质, 获得资质, 有资质记录, 获得过资质, 有荣誉]
+    sql: "EXISTS (SELECT 1 FROM `标签数据` qx WHERE qx.`eid` = e.`eid`{time})"
+    time_column: "CAST(qx.`year` AS SIGNED)"
+    requires: [e]
+  no_qualification:
+    label: 没有资质记录
+    group: qualification_exists
+    synonyms: [没有资质, 无资质, 未获得资质, 没有资质记录]
+    sql: "NOT EXISTS (SELECT 1 FROM `标签数据` qx WHERE qx.`eid` = e.`eid`{time})"
+    time_column: "CAST(qx.`year` AS SIGNED)"
+    requires: [e]
+  valid_qualification:
+    label: 有效资质
+    group: qualification_state
+    synonyms: [有效资质, 资质有效, 仍然有效, 有效的]
+    sql: "q.`state` = '有效'"
+    requires: [q]
+  expired_qualification:
+    label: 已过期资质
+    group: qualification_state
+    synonyms: [已过期, 过期, 失效]
+    sql: "q.`state` = '过期'"
+    requires: [q]
+  target_cancelled:
+    label: 被投企业已注销
+    group: target_status
+    synonyms: [被投企业已注销, 注销的被投企业, 被投企业注销]
+    sql: "v.`invest_status` LIKE '%注销%'"
+    requires: [v]
+  full_ownership:
+    label: 全资持股
+    group: ownership
+    synonyms: [全资, 全资子公司, 持股100%]
+    sql: "v.`stock_percent` >= 1"
+    requires: [v]
+  bid_amount_known:
+    label: 有项目金额
+    group: bid_amount
+    synonyms: [有金额, 有项目金额, 金额不为空]
+    sql: "b.`project_bid_money` IS NOT NULL"
+    requires: [b]
+
+value_maps:
+  city:
+    label: 登记城市
+    code_table: city
+    aliases: {广州: "4401", 深圳: "4403", 珠海: "4404", 汕头: "4405", 佛山: "4406", 江门: "4407", 湛江: "4408", 茂名: "4409", 肇庆: "4412", 惠州: "4413", 梅州: "4414", 汕尾: "4415", 河源: "4416", 阳江: "4417", 清远: "4418", 东莞: "4419", 中山: "4420", 潮州: "4451", 揭阳: "4452", 云浮: "4453", 韶关: "4402"}
+    column: "e.`district_code`"
+    match: prefix
+    requires: [e]
+    assumption: 城市按企业登记地（district_code 前四位）匹配。
+  district:
+    label: 登记区县
+    code_table: district
+    aliases: {}
+    column: "e.`district_code`"
+    match: equals
+    requires: [e]
+  industry_section:
+    label: 行业门类
+    code_table: industry_section
+    aliases: {信息技术服务业: I, 信息技术: I, 科技服务业: M, 科技服务: M, 商务服务: L, 批发零售: F}
+    column: "i.`industry_code`"
+    match: prefix
+    requires: [i]
+  industry_division:
+    label: 行业大类
+    code_table: industry_division
+    aliases: {软件业: I65, 互联网行业: I64, 研发服务: M73, 科技推广: M75, 建筑装饰: E50, 电子设备制造: C39}
+    column: "i.`industry_code`"
+    match: prefix
+    requires: [i]
+  round:
+    label: 融资轮次
+    code_table: null
+    aliases: {种子轮: 种子轮, 天使轮: 天使轮, Pre-A轮: Pre-A轮, A轮: A轮, A+轮: A+轮, Pre-B轮: Pre-B轮, B轮: B轮, B+轮: B+轮, C轮: C轮, Pre-IPO: Pre-IPO, IPO: IPO, 战略投资: 战略投资, 股权投资: 股权投资, 股权转让: 股权转让, 新三板定增: 新三板定增, 新三板: 新三板, 被收购: 被收购, 主板定向增发: 主板定向增发}
+    column: "f.`round`"
+    match: equals
+    requires: [f]
+
+# 示例问题：界面、API 与拒答时的推荐都用这里的问题。
+# requires_llm 为 true 的问题语义层会拒答，需要配置模型；测试会核对每条示例与实际能力一致。
+examples:
+  - {question: 统计企业经营状态分布, category: 分布}
+  - {question: 各行业门类的企业数量, category: 分布}
+  - {question: 按注册资本区间统计企业数量, category: 分布}
+  - {question: 按行业统计企业数量 Top 10, category: 排名}
+  - {question: 哪家企业的招投标记录最多, category: 排名}
+  - {question: 注册资本最高的10家企业, category: 排名}
+  - {question: 按成立年份统计企业数量趋势, category: 趋势}
+  - {question: 近三年每年的融资事件数, category: 趋势}
+  - {question: 2025年各月的招投标数量, category: 趋势}
+  - {question: 广州市存续企业有多少家, category: 筛选}
+  - {question: 天河区有融资记录的企业名单, category: 筛选}
+  - {question: 注册资本超过1000万的存续企业数量, category: 筛选}
+  - {question: 2020年以来有融资记录的企业数量, category: 存在性}
+  - {question: 有融资但没有招投标记录的企业有哪些, category: 存在性}
+  - {question: 佛山市各企业类型的企业数量占比, category: 占比}
+  - {question: 各融资轮次的融资金额合计, category: 融资}
+  - {question: 每个城市招投标记录最多的企业分别是哪家, category: 长尾, requires_llm: true}
+  - {question: 各城市获得融资的企业占该城市企业总数的比例, category: 长尾, requires_llm: true}
+  - {question: 融资事件数每年比上一年增加了多少, category: 长尾, requires_llm: true}
+  - {question: 被投资企业也在库中的对外投资记录有哪些, category: 长尾, requires_llm: true}

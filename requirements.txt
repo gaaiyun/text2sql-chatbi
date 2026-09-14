@@ -1,0 +1,17 @@
+# 运行依赖：Streamlit Cloud、Docker 与本地运行都从这里安装；与 pyproject.toml 的 dependencies 保持一致
+sqlglot>=30.8,<31
+duckdb>=1.1,<2
+pyarrow>=15
+langgraph>=1.0,<2
+openai>=1.40,<4
+mcp>=2.2,<3
+PyMySQL>=1.1
+PyYAML>=6.0
+pandas>=2.0
+altair>=5.0
+streamlit>=1.40,<2
+fastapi>=0.110
+uvicorn>=0.29
+slowapi>=0.1.9
+python-dotenv>=1.0
+pydantic>=2.5

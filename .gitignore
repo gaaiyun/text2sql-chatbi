@@ -1,0 +1,113 @@
+# Text2SQL 项目 .gitignore
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# === 敏感配置（永远不要提交）===
+config.json
+.env
+.env.local
+.env.*.local
+.streamlit/secrets.toml
+*.local.json
+*.local.yaml
+local_config.py
+config.local.json
+config.local.yaml
+
+# === API 密钥和凭证 ===
+*_key.txt
+*_secret.txt
+*_password.txt
+credentials.json
+secrets.json
+auth.json
+
+# === 数据库备份 ===
+*.sql
+*.dump
+
+# === 数据库 ===
+*.db
+*.sqlite
+*.sqlite3
+
+# === IDE ===
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# === 日志 ===
+*.log
+logs/
+
+# === 临时文件 ===
+tmp/
+temp/
+*.tmp
+*.bak
+
+# === 测试 ===
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# === 文档（可选）===
+# docs/_build/
+
+# === 备份 ===
+backups/
+*.zip
+*.tar.gz
+
+# === 输出文件 ===
+output/
+demo/output/
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.docx
+*.xlsx
+
+# === v2 ===
+# 本地生成的合成演示库与评测中间产物
+data/demo/
+*.duckdb
+*.duckdb.wal
+.ruff_cache/
+# 生产 DDL（已去除账号信息）与 README 截图需要入库
+!text2sql/datasets/**/*.sql
+!docs/images/*.png
+site/dist/
+.wrangler/
+
+# v1 代码与完整开发历史保留在旧仓库 gaaiyun/text2sql-analysis，不进本仓库
+/legacy/

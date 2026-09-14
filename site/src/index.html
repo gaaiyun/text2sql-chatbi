@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>text2sql · 可审计的中文问数引擎</title>
+  <meta name="description" content="语义层编译与 SQL 智能体双路径的 Text2SQL 引擎。SQL 经语法树安全门、代价预估与结果质量检查；Python 与 DuckDB 以 WebAssembly 在浏览器中运行，模型走 Cloudflare Workers AI。">
+  <meta name="theme-color" content="#0f1318">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="/assets/fonts/heavy.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/assets/fonts/signage.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/css/site.css?v=__BUILD__">
+  <script type="module" src="/assets/js/app.js?v=__BUILD__"></script>
+</head>
+<body>
+  <header class="masthead">
+    <div class="wrap">
+      <a class="brand" href="#top" aria-label="text2sql">
+        <span class="plate" aria-hidden="true">T2S</span>
+        <span class="wordmark"><b>text2sql</b><span>可审计的中文问数引擎</span></span>
+      </a>
+      <nav class="toc" aria-label="章节">
+        <a href="#ask"><i>01</i>问数</a>
+        <a href="#board"><i>02</i>看板</a>
+        <a href="#evaluation"><i>03</i>评测</a>
+        <a href="#semantic"><i>04</i>语义层</a>
+        <a href="#architecture"><i>05</i>架构</a>
+      </nav>
+      <div class="engine-pill" id="engine-pill" data-state="loading" role="status" aria-live="polite">
+        <span class="led" aria-hidden="true"></span><span id="engine-label">引擎待加载</span>
+      </div>
+      <a class="repo" href="https://github.com/gaaiyun/text2sql-chatbi" rel="noopener">GitHub</a>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="wrap hero-grid reveal">
+        <div class="hero-copy">
+          <p class="kicker"><span class="kicker-mark">TEXT → SQL</span>六个数据集 · 浏览器内运行</p>
+          <h1>把中文问题<br>变成<mark>可审计</mark>的 SQL</h1>
+          <p class="lede">语义层把业务口径编译成确定的 SQL，覆盖不到的长尾问题交给带工具的 SQL 智能体。每条 SQL 执行前过语法树安全门和代价预估，执行后做结果质量检查。下面的控制台运行在你的浏览器里：Python 与 DuckDB 编译为 WebAssembly，跑的是与服务端同一份代码。可以问合成的企业库、四个开源数据集，也可以拖进自己的表格；结果能换图表、改 SQL 重跑、钉到看板。</p>
+        </div>
+        <div class="spec-plate" aria-label="运行规格">
+          <div class="plate-head"><span>运行规格</span><span class="mono">SPEC</span></div>
+          <dl class="spec" id="spec">
+            <div><dt>运行位置</dt><dd>浏览器 Web Worker · WebAssembly</dd></div>
+            <div><dt>引擎</dt><dd class="mono" id="spec-engine">Python 3.14 · DuckDB · sqlglot</dd></div>
+            <div><dt>模型</dt><dd id="spec-model">Cloudflare Workers AI（长尾问题）</dd></div>
+            <div><dt>数据</dt><dd id="spec-data">按生产表结构生成的合成库</dd></div>
+            <div><dt>评测</dt><dd id="spec-eval">—</dd></div>
+            <div><dt>测试</dt><dd id="spec-tests">—</dd></div>
+          </dl>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="ask">
+      <div class="wrap">
+        <header class="section-head">
+          <span class="num">01</span>
+          <div>
+            <h2>问数</h2>
+            <p>企业库的问题先走手写语义层，在浏览器里直接编译、校验、执行，零模型调用；语义层放弃的长尾问题、开源数据集和你上传的文件交给 SQL 智能体，模型经本站 Worker 调用 Cloudflare Workers AI。</p>
+          </div>
+        </header>
+
+        <div class="console">
+          <div class="datasets" id="datasets" role="tablist" aria-label="数据集">
+            <button class="dataset" type="button" role="tab" data-dataset="demo" aria-selected="true">
+              <b>智能制造企业</b><small>合成 · 手写语义层</small>
+            </button>
+          </div>
+
+          <section class="sheet" id="sheet" aria-live="polite" hidden></section>
+
+          <div class="upload" id="upload" hidden>
+            <label class="dropzone" id="dropzone">
+              <input type="file" id="file-input" multiple accept=".csv,.tsv,.txt,.xlsx,.xls,.parquet,.json,.jsonl,.ndjson">
+              <span class="dropzone-title">把文件拖到这里，或点击选择</span>
+              <span class="dropzone-note">支持 CSV、TSV、Excel、Parquet、JSON，可一次放多个文件（每个文件一张表）。文件在浏览器里导入 DuckDB，不会上传到服务器；提问时表结构、字段取值样例和试运行的前几行会发给 Cloudflare Workers AI 生成 SQL，疑似个人信息字段（姓名、手机号等）不会被读取。</span>
+            </label>
+            <div class="upload-bar">
+              <span class="mono small" id="upload-status"></span>
+            </div>
+            <div class="upload-summary" id="upload-summary"></div>
+          </div>
+
+          <form class="ask-form" id="ask-form" autocomplete="off">
+            <label class="label" for="ask-input">提问</label>
+            <textarea class="ask-input" id="ask-input" rows="1" maxlength="500" placeholder="例如：近三年每年的融资事件数" required></textarea>
+            <button class="btn" type="submit" id="ask-button">运行 <kbd>Enter</kbd></button>
+          </form>
+
+          <div class="modes" id="modes" role="radiogroup" aria-label="规划方式">
+            <span class="label">规划</span>
+            <button type="button" class="mode" role="radio" data-mode="auto" aria-checked="false" disabled>语义层优先，长尾交给 SQL 智能体<small id="mode-auto-note">检测模型中</small></button>
+            <button type="button" class="mode" role="radio" data-mode="semantic" aria-checked="true">仅语义层<small>零模型调用</small></button>
+          </div>
+
+          <div class="boot" id="boot" hidden>
+            <span id="boot-stage">准备引擎</span>
+            <span class="boot-track" aria-hidden="true"><span id="boot-bar"></span></span>
+            <span class="mono" id="boot-size"></span>
+          </div>
+
+          <div class="console-bar">
+            <span id="thread-label" class="mono">会话 —</span>
+            <button class="link-btn" type="button" id="new-thread">新会话</button>
+            <span class="spacer"></span>
+            <span class="muted" id="follow-hint">同一会话内可以追问：先问“广州市存续企业有多少家”，再问“那深圳呢”。</span>
+          </div>
+
+          <div class="examples" id="examples"></div>
+        </div>
+
+        <div class="thread" id="thread" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <section class="section" id="board">
+      <div class="wrap">
+        <header class="section-head">
+          <span class="num">02</span>
+          <div>
+            <h2>看板</h2>
+            <p>问数结果上点「钉到看板」，图表连同数据快照一起保存在本机浏览器里，不经过服务器。「刷新」用当前页面的引擎重新执行 SQL，换数据集的卡片会先载入对应数据集。</p>
+          </div>
+        </header>
+        <div class="board-bar">
+          <span class="mono small" id="board-count">0 张卡片</span>
+          <button class="link-btn" type="button" id="board-clear" hidden>清空看板</button>
+        </div>
+        <div class="board" id="board-grid"></div>
+        <p class="board-empty" id="board-empty">还没有卡片。先在上面问一个问题，比如在 Northwind 里问“1997 年各产品类别的销售额”，再点结果下方的「钉到看板」。</p>
+      </div>
+    </section>
+
+    <section class="section" id="evaluation">
+      <div class="wrap">
+        <header class="section-head">
+          <span class="num">03</span>
+          <div>
+            <h2>评测</h2>
+            <p id="eval-intro">判分执行两边的 SQL、比较结果集，不比较 SQL 文本。未作答的题目是语义层主动放弃，不计为答错。</p>
+          </div>
+        </header>
+        <div class="figures" id="figures"></div>
+        <div class="eval-grid">
+          <div class="panel">
+            <div class="panel-head"><span>分类别结果</span><span class="mono">BY CATEGORY</span></div>
+            <div class="table-wrap flat"><table class="data" id="category-table"></table></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><span>语义层放弃的题目</span><span class="mono">DECLINED</span></div>
+            <ol class="declined-list" id="declined-list"></ol>
+          </div>
+        </div>
+        <div class="rerun">
+          <button class="btn btn-ghost" type="button" id="rerun">在浏览器里重跑全部评测</button>
+          <span class="ticker mono" id="ticker">页面上的数字来自构建时的运行；重跑用的是本页加载的同一个引擎。</span>
+        </div>
+        <div class="method">
+          <div><h4>比较方式</h4><p>按列签名匹配投影列，列名和列顺序无关；数值保留两位小数；除排名类题目外忽略行序。</p></div>
+          <div><h4>指标口径</h4><p>覆盖率 = 作答 / 应答；作答精确率 = 作答且正确 / 作答；执行准确率 = 正确 / 应答；拒答准确率 = 正确拒答 / 应拒。</p></div>
+          <div><h4>局限</h4><p>评测集与语义层出自同一作者，失败题只通过通用规则修复。这组数字适合做回归门禁，不代表对陌生问题的泛化能力。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="semantic">
+      <div class="wrap">
+        <header class="section-head">
+          <span class="num">04</span>
+          <div>
+            <h2>语义层</h2>
+            <p>业务口径写在 YAML 里：什么算存续企业，融资金额为空时怎么补齐，哪些宽表带占位行。解析器要求问题里的每个实义词都被解释，解释不了就放弃，不去猜。</p>
+          </div>
+        </header>
+        <form class="explain-input" id="explain-form" autocomplete="off">
+          <input id="explain-input" maxlength="200" value="2020年以来有融资记录的企业数量" aria-label="要解析的问题">
+          <button class="btn btn-ghost" type="submit">解析</button>
+        </form>
+        <p class="annotated" id="annotated" aria-live="polite"></p>
+        <div class="legend" id="legend">
+          <span><i class="k-entity"></i>实体 / 计数</span>
+          <span><i class="k-metric"></i>指标</span>
+          <span><i class="k-dimension"></i>维度</span>
+          <span><i class="k-filter"></i>筛选 / 取值</span>
+          <span><i class="k-time"></i>时间 / 数量槽位</span>
+          <span><i class="k-stop"></i>功能词</span>
+          <span class="legend-bad">删除线：无法解释</span>
+        </div>
+        <div class="explain-grid">
+          <div class="panel">
+            <div class="panel-head"><span>词语匹配</span><span class="mono">MATCHES</span></div>
+            <div class="table-wrap flat" style="max-height:340px"><table class="data" id="match-table"></table></div>
+          </div>
+          <div class="panel" id="explain-result"></div>
+        </div>
+        <div class="catalog" id="catalog"></div>
+        <ol class="rules" id="rules"></ol>
+      </div>
+    </section>
+
+    <section class="section" id="architecture">
+      <div class="wrap">
+        <header class="section-head">
+          <span class="num">05</span>
+          <div>
+            <h2>架构</h2>
+            <p>一次提问是一次状态机运行，像一条生产线：节点是工位，安全门和质量检查是质检，报错或可疑结果进入返工。服务端用 LangGraph 编排，浏览器里用顺序执行器，两者的输出由测试逐项核对。</p>
+          </div>
+        </header>
+        <figure class="diagram panel">
+          <div class="panel-head"><span>工作流</span><span class="mono">11 STATIONS · FROM ROUTING TABLE</span></div>
+          <div class="diagram-body"><svg id="workflow" viewBox="0 0 1120 330" role="img" aria-label="11 个节点的工作流"></svg></div>
+          <figcaption>实线为固定流转，虚线为条件路由，红色为返工回路；底部轨道是提前结束（拒答、失败）的出口。深色工位是本页最近一次运行经过的路径。图中的边由代码里的路由表生成。</figcaption>
+        </figure>
+
+        <table class="compare">
+          <thead><tr><th></th><th>服务端 · CLI / FastAPI / MCP / Streamlit</th><th>本页 · 浏览器</th></tr></thead>
+          <tbody>
+            <tr><th>编排</th><td>LangGraph，检查点按会话保存历史，SSE 推送节点事件</td><td>顺序执行器，同一组节点与路由表，会话保存在页面内存</td></tr>
+            <tr><th>规划</th><td>语义层编译 + SQL 智能体（OpenAI 兼容接口，函数调用）</td><td>语义层编译 + SQL 智能体（同源 Worker 转发到 Workers AI，限流、只收同源请求，页面不持有密钥）</td></tr>
+            <tr><th>数据</th><td>MySQL 只读会话，或 DuckDB 演示库</td><td>DuckDB（WebAssembly）：合成演示库、按提交固定并校验过的开源数据集（Parquet）、你上传的文件</td></tr>
+            <tr><th>安全</th><td>语法树安全门、EXPLAIN 代价预估、查询超时中断</td><td>同一安全门与代价预估；WebAssembly 没有线程，不做超时中断</td></tr>
+          </tbody>
+        </table>
+
+        <ol class="decisions">
+          <li><h3>宁可放弃，也不给看似合理的错误结果</h3><p>覆盖检查之外，还有结构性拒答：分组内取排名、在排名集合里再计数，这类问题照常编译会得到数字漂亮但口径错误的答案。评测里未作答的题目全部来自主动放弃。</p></li>
+          <li><h3>安全门在语法树上判断</h3><p>用 sqlglot 解析：只允许单条只读语句，表走白名单，拦截跨库与系统函数、SELECT * 和个人信息字段，逐列校验字段是否存在并给出相近字段，收紧 LIMIT。MySQL 会话本身也设为只读。</p></li>
+          <li><h3>条件取值要落在真实数据上</h3><p>值索引扫描低基数列的真实取值。结果为空且条件里的取值在库中不存在时，把真实取值反馈给 SQL 智能体重写，例如把 status = '存续' 改成 LIKE '存续%'。</p></li>
+          <li><h3>执行成功不等于答对</h3><p>结果画像之后做 8 项质量检查：截断、排名数量、时间顺序、宽表占位行等。解读里的每个数字都必须能在结果中找到，否则退回由结果直接生成的解读。</p></li>
+          <li><h3>编排器可以替换</h3><p>LangGraph 依赖的原生扩展装不进 Pyodide。节点逻辑与编排拆开之后，浏览器端改用顺序执行器，用 62 道评测题、多轮追问和修复回路核对两种编排器输出一致。</p></li>
+          <li><h3>语义层是配置，不是代码</h3><p>领域词、表召回规则、业务口径都写在 YAML 里。新数据集导入时先自动画像（字段角色、真实取值、疑似个人信息），开源数据集再叠一张人写的数据卡片（中文字段名、表间关联、口径），接入四个开源库没有改一行智能体代码。</p></li>
+        </ol>
+
+        <p class="stack mono" id="stack"></p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="colophon">
+    <div class="wrap title-block">
+      <div><span class="label">项目</span><b>text2sql-chatbi</b></div>
+      <div><span class="label">构建</span><b class="mono" id="build-line">—</b></div>
+      <div><span class="label">数据</span><b>企业库为合成数据；Northwind、Chinook（MIT）· Gapminder（CC0）· Our World in Data（CC BY 4.0）</b></div>
+      <div><span class="label">字体</span><b>思源黑体 · Big Shoulders · Chivo Mono（SIL OFL 1.1）</b></div>
+    </div>
+  </footer>
+</body>
+</html>

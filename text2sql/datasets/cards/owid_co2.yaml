@@ -1,0 +1,80 @@
+id: owid_co2
+kind: open
+title: 全球碳排放
+tagline: 219 个国家或地区 · 1950–2024 · 排放 · 能源 · GDP
+summary: >-
+  Our World in Data 汇编的各国二氧化碳与温室气体排放、人口、GDP 和能源消费，本站截取 1950 年以来的数据。
+  排放来自 Global Carbon Budget (2025)，GDP 来自 Maddison Project Database 2023，能源来自美国能源信息署，
+  温室气体来自 Jones 等 (2025)。国家与区域合计分成两张表。
+source:
+  name: Our World in Data · owid/co2-data
+  url: https://github.com/owid/co2-data
+license:
+  name: CC BY 4.0
+  url: https://creativecommons.org/licenses/by/4.0/
+anchor_year: 2024
+
+tables:
+  country_emissions:
+    label: 各国排放
+    description: 每行是一个国家或地区在一年的排放、人口、GDP 与能源消费
+    synonyms: [国家, 碳排放, 排放量, 二氧化碳, 温室气体, 能源消费]
+    columns:
+      country: 国家或地区英文名
+      country_zh: {label: 国家或地区, description: 中文名，如 中国、美国、印度、德国, synonyms: [国家]}
+      iso_code: ISO 国家代码
+      year: 年份
+      population: 人口
+      gdp: {label: GDP, description: 2011 年价格的国际元，截至 2022 年}
+      co2: {label: 二氧化碳排放量, description: 百万吨, synonyms: [碳排放, 排放量]}
+      co2_per_capita: {label: 人均二氧化碳排放, description: 吨每人, synonyms: [人均碳排放, 人均排放]}
+      co2_per_gdp: {label: 单位 GDP 二氧化碳排放, description: 千克每国际元}
+      coal_co2: {label: 煤炭排放, description: 百万吨}
+      oil_co2: {label: 石油排放, description: 百万吨}
+      gas_co2: {label: 天然气排放, description: 百万吨}
+      cement_co2: {label: 水泥排放, description: 百万吨}
+      flaring_co2: {label: 火炬燃烧排放, description: 百万吨}
+      other_industry_co2: {label: 其他工业排放, description: 百万吨}
+      land_use_change_co2: {label: 土地利用变化排放, description: 百万吨}
+      share_global_co2: {label: 占全球排放比例, description: 百分数，12.5 表示 12.5%}
+      cumulative_co2: {label: 累计排放量, description: 自有记录以来的累计，百万吨}
+      total_ghg: {label: 温室气体总排放, description: 百万吨二氧化碳当量}
+      methane: {label: 甲烷排放, description: 百万吨二氧化碳当量}
+      nitrous_oxide: {label: 氧化亚氮排放, description: 百万吨二氧化碳当量}
+      primary_energy_consumption: {label: 一次能源消费, description: 太瓦时}
+      energy_per_capita: {label: 人均能源消费, description: 千瓦时}
+  region_emissions:
+    label: 区域排放合计
+    description: 每行是世界、大洲或收入分组在一年的合计
+    synonyms: [世界, 全球, 大洲, 各洲, 欧盟, 收入分组, 国际航空, 国际航运]
+    columns:
+      region: 区域英文名
+      region_zh: {label: 区域, description: 世界、非洲、亚洲、欧洲、北美洲、南美洲、大洋洲、欧盟（27 国）、高收入国家等}
+      year: 年份
+      population: 人口
+      gdp: {label: GDP, description: 2011 年价格的国际元，截至 2022 年}
+      co2: {label: 二氧化碳排放量, description: 百万吨}
+      co2_per_capita: {label: 人均二氧化碳排放, description: 吨每人}
+      coal_co2: {label: 煤炭排放, description: 百万吨}
+      oil_co2: {label: 石油排放, description: 百万吨}
+      gas_co2: {label: 天然气排放, description: 百万吨}
+      cement_co2: {label: 水泥排放, description: 百万吨}
+      share_global_co2: {label: 占全球排放比例, description: 百分数}
+      cumulative_co2: {label: 累计排放量, description: 百万吨}
+      total_ghg: {label: 温室气体总排放, description: 百万吨二氧化碳当量}
+      primary_energy_consumption: {label: 一次能源消费, description: 太瓦时}
+
+rules:
+  - 排放量单位是百万吨（Mt），人均排放单位是吨每人，share_global_co2 是百分数。
+  - country_emissions 只含国家或地区；世界、大洲、欧盟、收入分组的合计在 region_emissions，两张表的数字不能相加。
+  - 空值表示来源没有统计，不是 0；排名和求平均前先过滤 IS NOT NULL。
+  - 排放与人口截至 2024 年，GDP 截至 2022 年；计算人均 GDP 用 gdp / population。
+  - 展示国家名用 country_zh，展示区域名用 region_zh。
+
+suggestions:
+  - 2024 年二氧化碳排放量最多的 10 个国家
+  - 中国、美国、印度 2000 年以来的排放量变化
+  - 2024 年人口超过 1000 万的国家里，人均碳排放最高的 10 个
+  - 2024 年世界排放中煤炭、石油、天然气各多少
+  - 各大洲 1990 年和 2024 年的排放量对比
+  - 累计排放量最多的 10 个国家
