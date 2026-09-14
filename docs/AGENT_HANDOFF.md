@@ -52,7 +52,11 @@
 
 - 评测集与语义层出自同一作者；长尾题的 SQL 智能体结果受模型波动影响，数字以 EVALUATION.md 最近一次运行为准。
 - Workers AI 免费额度每天 10,000 neurons，一道长尾题约 1 万到 2.5 万 token；高峰期可能用尽。
-- workers.dev 子域名在国内访问不稳定，正式展示建议绑定自有域名。
+- 域名：站点地址里的 `gaaiyun-risk-selfcheck` 是账号级 workers.dev 子域名，同账号还有 8 个 Worker 共用，不能为本项目单独改；
+  2026-09-15 尝试新建 Pages 项目（换 5 个名字）都被 Cloudflare 以 `Subdomain is blocked [8000030]` 拒绝。
+  账号里没有自有域名，暂时保持 workers.dev 地址；国内不开代理打不开。以后有域名时，在 `site/wrangler.jsonc`
+  加 `"routes": [{ "pattern": "子域名.你的域名", "custom_domain": true }]` 再部署即可。
+- 旧 Worker `text2sql-analysis`（旧版站点）仍在线，未删除。
 - 浏览器端没有查询超时中断（WebAssembly 无线程），依赖代价估算。
 - Docker 镜像未在本机构建验证（避免占用 C 盘），`docker compose config` 已通过。
 
