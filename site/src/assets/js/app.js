@@ -166,12 +166,38 @@ client.addEventListener("state", ({ detail }) => {
 client.addEventListener("progress", ({ detail }) => {
   const boot = $("#boot");
   boot.hidden = detail.stage === "ready";
+  if (state.llm && client.state !== "ready" && detail.stage !== "ready") {
+    $("#mode-auto-note").textContent = `Workers AI 已连接 · 引擎加载 ${Math.round(detail.ratio * 100)}%`;
+  }
   $("#boot-stage").textContent = detail.label;
   $("#boot-bar").style.width = `${Math.round(detail.ratio * 100)}%`;
   $("#boot-size").textContent = detail.total
     ? `${(detail.received / 1048576).toFixed(1)} / ${(detail.total / 1048576).toFixed(1)} MB`
     : "";
 });
+
+function applyModelState(available, note) {
+  state.llm = available;
+  $('.mode[data-mode="auto"]').disabled = !available;
+  $("#mode-auto-note").textContent = note;
+  if (available && state.turns <= 1) selectMode("auto", { quiet: true });
+}
+
+// 模型是否可用只取决于 Worker 有没有绑定 Workers AI，页面打开就检测，不必等二十多 MB 的引擎下载完
+async function detectModel() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const health = await (await fetch("/api/health", { cache: "no-store", signal: controller.signal })).json();
+    if (client.state !== "ready") {
+      applyModelState(Boolean(health.ai), health.ai ? "Workers AI 已连接" : "本环境未接模型");
+    }
+  } catch {
+    if (client.state !== "ready") applyModelState(false, "模型接口不可达");
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function bootEngine() {
   if (client.state !== "idle") return client.bootPromise;
@@ -183,11 +209,9 @@ function bootEngine() {
       setEnginePill("ready", `就绪 · Python ${info.python} · DuckDB ${info.duckdb}`);
       $("#spec-engine").textContent =
         `Python ${info.python} · DuckDB ${info.duckdb} · sqlglot ${info.sqlglot} · 启动 ${seconds} s`;
-      state.llm = (info.modes || []).includes("auto");
-      const autoButton = $('.mode[data-mode="auto"]');
-      autoButton.disabled = !state.llm;
-      $("#mode-auto-note").textContent = state.llm ? "Cloudflare Workers AI" : "本环境未接模型";
-      if (state.llm && state.turns <= 1) selectMode("auto", { quiet: true });
+      // 以引擎实际创建的智能体为准（引擎启动时自己也检测了一次模型接口）
+      const available = (info.modes || []).includes("auto");
+      applyModelState(available, available ? "Workers AI 已连接" : "本环境未接模型");
       if (state.site && state.dataset === DEMO) renderExamples(state.site.examples);
     })
     .catch(() => {});
@@ -1364,6 +1388,7 @@ async function main() {
   wireBoard();
   observeSections();
   updateThreadLabel();
+  detectModel();
   const site = await (await fetch(`/data/site.json?v=${BUILD}`)).json();
   state.site = site;
   renderMeta(site);

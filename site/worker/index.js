@@ -1,4 +1,5 @@
 // Cloudflare Worker：静态资源由 assets 直接响应（不计入 Worker 调用）；只有 /api/* 先进入这里。
+// 以后绑定自有域名或放到 Pages 后面（Service Binding 转发 /api/*）时，这份代码不用改。
 //
 // /api/llm 把浏览器里 SQL 智能体的请求转发给 Workers AI（账号的免费额度），返回 OpenAI chat-completions 格式。
 // 防护：只接受同源请求、按 IP 限流、限制请求体大小与工具名单、服务端固定模型；页面里没有任何密钥。
@@ -146,6 +147,7 @@ export default {
     }
     if (url.pathname === "/api/llm") return handleLLM(request, env, url);
     if (url.pathname.startsWith("/api/")) return json({ error: "not_found" }, 404);
-    return env.ASSETS.fetch(request);
+    // 页面由 Pages 提供；本地 wrangler dev 带 assets 绑定时仍可直接预览
+    return env.ASSETS ? env.ASSETS.fetch(request) : json({ error: "not_found" }, 404);
   },
 };
